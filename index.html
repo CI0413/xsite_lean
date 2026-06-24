@@ -1,0 +1,450 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const { useState, useMemo, useRef } = React;
+
+const LEVELS = ["Lean 1A", "Lean 1B", "Lean 1C"];
+const LEAN1A_TRAINED_TARGET = 135;
+const NAVY = "#002664";
+const ORANGE = "#D97706";
+const LIGHT_BG = "#F0F3F8";
+
+function normalizeName(s) {
+  return (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function findCol(keys, ...terms) {
+  // Return the first key whose lowercase version contains any of the terms
+  for (const term of terms) {
+    const match = keys.find(k => k.toLowerCase().trim() === term.toLowerCase().trim());
+    if (match) return match;
+  }
+  for (const term of terms) {
+    const match = keys.find(k => k.toLowerCase().includes(term.toLowerCase()));
+    if (match) return match;
+  }
+  return null;
+}
+
+function parseWorkbook(wb) {
+  const byName = {}; // normalised name → best row
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    const raw = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    if (!raw.length) continue;
+    const keys = Object.keys(raw[0]);
+
+    // Detect columns
+    const nameKey  = findCol(keys, 'Name1', 'Name', 'Full Name');
+    const scoreKey = findCol(keys, 'Total points', 'Total Points', 'Score', 'Points', 'Total');
+    const siteKey  = findCol(keys, 'Site Name', 'Site');
+
+    for (const row of raw) {
+      const nameVal  = nameKey  ? (row[nameKey]  || '').toString().trim() : '';
+      const scoreRaw = scoreKey ? row[scoreKey] : '';
+      const siteVal  = siteKey  ? (row[siteKey]  || '').toString().trim() : '';
+      const score    = parseFloat(scoreRaw);
+
+      if (!nameVal || isNaN(score)) continue;
+
+      const key = normalizeName(nameVal);
+      if (!byName[key] || score > byName[key].score) {
+        byName[key] = { name: nameVal, score, site: siteVal };
+      }
+    }
+  }
+
+  return Object.values(byName);
+}
+
+function rowsToTrainees(rows) {
+  return rows.map((p, i) => ({
+    id: i, name: p.name, score: p.score,
+    site: p.site || '',
+    examPassed: p.score >= 16,
+    training: 'Lean 1A', cipCompleted: false,
+    trainerLevel: 'None', trainerStatus: 'None',
+  }));
+}
+
+function MiniBar({ pct, color }) {
+  return React.createElement('div', { style: { background: '#e5e7eb', borderRadius: 4, height: 8, width: '100%', overflow: 'hidden' } },
+    React.createElement('div', { style: { width: Math.min(100, Math.max(0, pct)) + '%', background: color, height: '100%', borderRadius: 4, transition: 'width 0.4s' } })
+  );
+}
+
+function RingChart({ pct, color, size, sub }) {
+  size = size || 64;
+  const r = (size - 12) / 2;
+  const circ = 2 * Math.PI * r;
+  const safePct = Math.min(100, Math.max(0, pct));
+  const dash = (safePct / 100) * circ;
+  const e = React.createElement;
+  return e('svg', { width: size, height: size, style: { flexShrink: 0 } },
+    e('circle', { cx: size/2, cy: size/2, r, fill: 'none', stroke: '#e5e7eb', strokeWidth: 9 }),
+    e('circle', { cx: size/2, cy: size/2, r, fill: 'none', stroke: color, strokeWidth: 9,
+      strokeDasharray: dash + ' ' + (circ - dash), strokeLinecap: 'round',
+      transform: 'rotate(-90 ' + (size/2) + ' ' + (size/2) + ')' }),
+    e('text', { x: size/2, y: sub ? size/2 - 1 : size/2 + 5, textAnchor: 'middle', fontSize: 12, fontWeight: 600, fill: color }, Math.round(safePct) + '%'),
+    sub && e('text', { x: size/2, y: size/2 + 11, textAnchor: 'middle', fontSize: 9, fill: '#9ca3af' }, sub)
+  );
+}
+
+function App() {
+  const [trainees, setTrainees] = useState([]);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [search, setSearch] = useState('');
+  const [filterLevel, setFilterLevel] = useState('All');
+  const [filterStatus, setFilterStatus] = useState('All');
+  const [sortCol, setSortCol] = useState('name');
+  const [sortDir, setSortDir] = useState('asc');
+  const [uploadMsg, setUploadMsg] = useState('');
+  const [uploadError, setUploadError] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
+  const fileRef = useRef();
+  const e = React.createElement;
+
+  function update(id, field, value) {
+    setTrainees(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
+  }
+  function getStatus(t) {
+    if (!t.examPassed) return 'Not trained';
+    if (t.cipCompleted) return 'Certified';
+    return 'Trained';
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+    setUploadMsg(''); setUploadError('');
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
+        const rows = parseWorkbook(wb);
+        if (!rows.length) {
+          setUploadError('No trainee data found. Ensure the file has a Name column and a Total Points / Score column.');
+          return;
+        }
+        setTrainees(rowsToTrainees(rows));
+        setUploadMsg(rows.length + ' trainees loaded from "' + file.name + '"');
+      } catch (err) {
+        setUploadError('Could not read file: ' + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function onFileInput(ev) { handleFile(ev.target.files[0]); ev.target.value = ''; }
+  function onDrop(ev) { ev.preventDefault(); setIsDragging(false); handleFile(ev.dataTransfer.files[0]); }
+
+  const overallTotal  = trainees.length;
+  const overallPassed = trainees.filter(t => t.examPassed).length;
+  const overallFailed = trainees.filter(t => !t.examPassed).length;
+  const overallCert   = trainees.filter(t => t.examPassed && t.cipCompleted).length;
+
+  const levelStats = useMemo(() => LEVELS.map(lvl => {
+    const g = trainees.filter(t => t.training === lvl);
+    const total = g.length, trained = g.filter(t => t.examPassed).length, certified = g.filter(t => t.examPassed && t.cipCompleted).length;
+    return { lvl, total, trained, certified };
+  }), [trainees]);
+
+  const roster = useMemo(() => {
+    let list = trainees;
+    if (search) list = list.filter(t =>
+      t.name.toLowerCase().includes(search.toLowerCase()) ||
+      (t.site || '').toLowerCase().includes(search.toLowerCase())
+    );
+    if (filterLevel !== 'All') list = list.filter(t => t.training === filterLevel);
+    if (filterStatus !== 'All') list = list.filter(t => getStatus(t) === filterStatus);
+    return [...list].sort((a, b) => {
+      let av = sortCol === 'status' ? getStatus(a) : (a[sortCol] ?? '');
+      let bv = sortCol === 'status' ? getStatus(b) : (b[sortCol] ?? '');
+      if (typeof av === 'string') av = av.toLowerCase();
+      if (typeof bv === 'string') bv = bv.toLowerCase();
+      return av < bv ? (sortDir === 'asc' ? -1 : 1) : av > bv ? (sortDir === 'asc' ? 1 : -1) : 0;
+    });
+  }, [trainees, search, filterLevel, filterStatus, sortCol, sortDir]);
+
+  function toggleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  }
+
+  const tabSt = (active) => ({
+    padding: '8px 18px', borderRadius: 8, border: 'none',
+    background: active ? NAVY : 'transparent', color: active ? '#fff' : '#374151',
+    fontWeight: active ? 500 : 400, cursor: 'pointer', fontSize: 14,
+  });
+  const thSt = { padding: '8px 8px', textAlign: 'left', fontSize: 11, color: '#6b7280', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap', background: LIGHT_BG, borderBottom: '0.5px solid #d1d5db', userSelect: 'none' };
+  const tdSt = { padding: '7px 8px', fontSize: 12, borderBottom: '0.5px solid #f3f4f6', color: '#111827', verticalAlign: 'middle' };
+  const selectSt = { fontSize: 12, padding: '3px 5px', border: '0.5px solid #d1d5db', borderRadius: 5, background: '#fff', width: '100%' };
+
+  function statusBadge(s) {
+    const map = { 'Certified': ['#d1fae5','#065f46'], 'Trained': ['#dbeafe','#1e40af'], 'Not trained': ['#fee2e2','#991b1b'] };
+    const [bg, color] = map[s] || ['#f3f4f6','#374151'];
+    return e('span', { style: { background: bg, color, borderRadius: 6, padding: '2px 7px', fontSize: 10, fontWeight: 500, whiteSpace: 'nowrap' } }, s);
+  }
+  function examBadge(passed) {
+    return passed
+      ? e('span', { style: { background: '#d1fae5', color: '#065f46', borderRadius: 6, padding: '2px 7px', fontSize: 10, fontWeight: 500 } }, 'Passed')
+      : e('span', { style: { background: '#fee2e2', color: '#991b1b', borderRadius: 6, padding: '2px 7px', fontSize: 10, fontWeight: 500 } }, 'Failed');
+  }
+  const arr = (col) => sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+
+  function UploadZone() {
+    return e('div', {
+      onDragOver: ev => { ev.preventDefault(); setIsDragging(true); },
+      onDragLeave: () => setIsDragging(false),
+      onDrop,
+      onClick: () => fileRef.current.click(),
+      style: { border: '2px dashed ' + (isDragging ? NAVY : '#d1d5db'), borderRadius: 12, padding: '28px 20px', textAlign: 'center', cursor: 'pointer', background: isDragging ? '#eef2ff' : '#fafafa', transition: 'all 0.2s', marginBottom: 24 }
+    },
+      e('div', { style: { fontSize: 28, marginBottom: 8 } }, '📂'),
+      e('div', { style: { fontWeight: 500, fontSize: 14, color: NAVY, marginBottom: 4 } }, trainees.length > 0 ? 'Upload a new file to refresh' : 'Upload your trainee file'),
+      e('div', { style: { fontSize: 12, color: '#6b7280', marginBottom: 6 } }, 'Drag & drop or click to browse · .xlsx, .xls, or .csv'),
+      e('div', { style: { fontSize: 11, color: '#9ca3af' } }, 'Reads: Name, Total Points, and Site Name columns automatically'),
+      uploadMsg && e('div', { style: { marginTop: 12, fontSize: 12, color: '#065f46', background: '#d1fae5', borderRadius: 6, padding: '5px 12px', display: 'inline-block' } }, '✓ ' + uploadMsg),
+      uploadError && e('div', { style: { marginTop: 12, fontSize: 12, color: '#991b1b', background: '#fee2e2', borderRadius: 6, padding: '5px 12px', display: 'inline-block' } }, '⚠ ' + uploadError)
+    );
+  }
+
+  function EmptyState() {
+    return e('div', { style: { textAlign: 'center', padding: '40px 20px', color: '#9ca3af' } },
+      e('div', { style: { fontSize: 36, marginBottom: 12 } }, '📋'),
+      e('div', { style: { fontSize: 15, fontWeight: 500, color: '#6b7280', marginBottom: 6 } }, 'No trainee data yet'),
+      e('div', { style: { fontSize: 13 } }, 'Upload a file above to populate the dashboard.')
+    );
+  }
+
+  function TrainerSection() {
+    const trainers = trainees.filter(t => t.trainerStatus !== 'None');
+    return e('div', { style: { background: '#fff', border: '0.5px solid #d1d5db', borderRadius: 12, padding: '16px 20px', marginTop: 24 } },
+      e('div', { style: { fontSize: 12, fontWeight: 500, color: NAVY, marginBottom: 14, textTransform: 'uppercase', letterSpacing: 0.6 } }, 'Certified trainers by level'),
+      e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: trainers.length ? 14 : 0 } },
+        ...LEVELS.map(lvl => {
+          const g = trainees.filter(t => t.trainerLevel === lvl);
+          const cert = g.filter(t => t.trainerStatus === 'Certified').length;
+          const intr = g.filter(t => t.trainerStatus === 'In-training').length;
+          return e('div', { key: lvl, style: { background: LIGHT_BG, borderRadius: 8, padding: '10px 12px' } },
+            e('div', { style: { fontWeight: 500, fontSize: 12, color: NAVY, marginBottom: 8 } }, lvl),
+            e('div', { style: { display: 'flex', gap: 6 } },
+              e('div', { style: { background: '#fef3c7', borderRadius: 6, padding: '5px 8px', flex: 1, textAlign: 'center' } },
+                e('div', { style: { fontSize: 18, fontWeight: 500, color: '#92400e' } }, cert),
+                e('div', { style: { fontSize: 9, color: '#92400e', marginTop: 1 } }, 'Certified')
+              ),
+              e('div', { style: { background: '#e0f2fe', borderRadius: 6, padding: '5px 8px', flex: 1, textAlign: 'center' } },
+                e('div', { style: { fontSize: 18, fontWeight: 500, color: '#075985' } }, intr),
+                e('div', { style: { fontSize: 9, color: '#075985', marginTop: 1 } }, 'In training')
+              )
+            )
+          );
+        })
+      ),
+      trainers.length > 0
+        ? e('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, borderTop: '0.5px solid #f3f4f6', paddingTop: 12 } },
+            ...trainers.map(t => {
+              const isCert = t.trainerStatus === 'Certified';
+              return e('div', { key: t.id, style: { display: 'flex', alignItems: 'center', gap: 5, background: isCert ? '#fef3c7' : '#e0f2fe', borderRadius: 6, padding: '3px 9px', fontSize: 11 } },
+                e('span', { style: { fontWeight: 500, color: isCert ? '#92400e' : '#075985' } }, t.name),
+                t.trainerLevel !== 'None' && e('span', { style: { color: isCert ? '#d97706' : '#38bdf8', fontSize: 9 } }, '·'),
+                t.trainerLevel !== 'None' && e('span', { style: { color: isCert ? '#b45309' : '#0284c7', fontSize: 10 } }, t.trainerLevel),
+                e('span', { style: { color: isCert ? '#d97706' : '#38bdf8', fontSize: 9 } }, '·'),
+                e('span', { style: { color: isCert ? '#b45309' : '#0284c7', fontSize: 10 } }, isCert ? 'Certified trainer' : 'In training')
+              );
+            })
+          )
+        : e('div', { style: { fontSize: 11, color: '#9ca3af', fontStyle: 'italic', borderTop: '0.5px solid #f3f4f6', paddingTop: 10 } }, 'No trainers assigned yet — set trainer level and status in the Trainee Roster tab.')
+    );
+  }
+
+  function LevelCard({ s }) {
+    const is1A = s.lvl === 'Lean 1A';
+    const trainedPct = is1A ? (s.trained / LEAN1A_TRAINED_TARGET) * 100 : (s.total ? (s.trained / s.total) * 100 : 0);
+    const certPct    = s.total ? (s.certified / s.total) * 100 : 0;
+    const remaining  = is1A ? Math.max(0, LEAN1A_TRAINED_TARGET - s.trained) : null;
+    return e('div', { style: { background: '#fff', border: is1A ? '1.5px solid ' + NAVY : '0.5px solid #d1d5db', borderRadius: 12, padding: '16px 20px', position: 'relative' } },
+      is1A && e('div', { style: { position: 'absolute', top: 10, right: 12, background: NAVY, color: '#fff', fontSize: 9, fontWeight: 500, borderRadius: 4, padding: '2px 7px', letterSpacing: 0.4 } }, 'TARGET: 135 TRAINED'),
+      e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 } },
+        e('div', null,
+          e('div', { style: { fontWeight: 500, fontSize: 15, color: NAVY } }, s.lvl),
+          e('div', { style: { fontSize: 11, color: '#6b7280', marginTop: 2 } }, s.total + ' enrolled' + (is1A ? ' · 135 trained required' : '')),
+          is1A && remaining > 0 && e('div', { style: { fontSize: 11, color: ORANGE, marginTop: 3, fontWeight: 500 } }, remaining + ' more needed to reach target')
+        ),
+        e('div', { style: { display: 'flex', gap: 8 } },
+          e('div', { style: { textAlign: 'center' } },
+            e(RingChart, { pct: trainedPct, color: '#1e40af', size: 62, sub: is1A ? 'of 135' : '' }),
+            e('div', { style: { fontSize: 9, color: '#6b7280', marginTop: 2 } }, 'Trained')
+          ),
+          e('div', { style: { textAlign: 'center' } },
+            e(RingChart, { pct: certPct, color: ORANGE, size: 62 }),
+            e('div', { style: { fontSize: 9, color: '#6b7280', marginTop: 2 } }, 'Certified')
+          )
+        )
+      ),
+      e('div', { style: { marginBottom: 8 } },
+        e('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#6b7280', marginBottom: 3 } },
+          e('span', null, is1A ? 'Trained ' + s.trained + ' / 135 required' : 'Trained ' + s.trained + ' / ' + s.total),
+          e('span', null, Math.round(trainedPct) + '%')
+        ),
+        e(MiniBar, { pct: trainedPct, color: '#1e40af' })
+      ),
+      e('div', null,
+        e('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#6b7280', marginBottom: 3 } },
+          e('span', null, 'Certified ' + s.certified + ' / ' + s.total + ' enrolled'),
+          e('span', null, Math.round(certPct) + '%')
+        ),
+        e(MiniBar, { pct: certPct, color: ORANGE })
+      )
+    );
+  }
+
+  return e('div', { style: { fontFamily: 'Arial, sans-serif', maxWidth: 980, margin: '0 auto', padding: '16px 8px' } },
+    // Header
+    e('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, borderBottom: '3px solid ' + NAVY, paddingBottom: 12 } },
+      e('div', { style: { display: 'flex', alignItems: 'center', gap: 14 } },
+        e('div', { style: { background: NAVY, borderRadius: 8, padding: '8px 14px' } },
+          e('span', { style: { color: '#fff', fontWeight: 700, fontSize: 15, letterSpacing: 1 } }, 'DSV')
+        ),
+        e('div', null,
+          e('div', { style: { fontWeight: 500, fontSize: 17, color: NAVY } }, 'Lean Training Dashboard'),
+          e('div', { style: { fontSize: 12, color: '#6b7280' } }, 'Americas Network · Continuous Improvement')
+        )
+      ),
+      e('button', {
+        onClick: () => fileRef.current && fileRef.current.click(),
+        style: { display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: NAVY, color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: 'pointer' }
+      },
+        e('input', { ref: fileRef, type: 'file', accept: '.xlsx,.xls,.csv', style: { display: 'none' }, onChange: onFileInput }),
+        '⬆ ', trainees.length > 0 ? 'Replace file' : 'Upload file'
+      )
+    ),
+
+    // Tabs
+    e('div', { style: { display: 'flex', gap: 4, marginBottom: 20, background: LIGHT_BG, borderRadius: 10, padding: 4, width: 'fit-content' } },
+      e('button', { style: tabSt(activeTab === 'dashboard'), onClick: () => setActiveTab('dashboard') }, 'Dashboard'),
+      e('button', { style: tabSt(activeTab === 'roster'), onClick: () => setActiveTab('roster') }, 'Trainee Roster')
+    ),
+
+    // ── DASHBOARD ──
+    activeTab === 'dashboard' && e('div', null,
+      trainees.length === 0
+        ? e('div', null, e(UploadZone, null), e(EmptyState, null))
+        : e('div', null,
+            uploadMsg && e('div', { style: { fontSize: 12, color: '#065f46', background: '#d1fae5', borderRadius: 8, padding: '7px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+              e('span', null, '✓ ' + uploadMsg),
+              e('span', { onClick: () => setUploadMsg(''), style: { cursor: 'pointer', color: '#065f46', opacity: 0.6, fontSize: 14 } }, '×')
+            ),
+            e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 24 } },
+              ...[
+                ['Total enrolled', overallTotal, NAVY, null],
+                ['Exam passed', overallPassed, '#2d7a3a', Math.round((overallPassed/(overallTotal||1))*100) + '% of enrolled'],
+                ['Exam failed', overallFailed, '#b91c1c', Math.round((overallFailed/(overallTotal||1))*100) + '% of enrolled'],
+                ['Trained', overallPassed, '#1e40af', 'Passed exam'],
+                ['Certified', overallCert, ORANGE, 'Passed + CIP done'],
+              ].map(([label, val, color, sub]) =>
+                e('div', { key: label, style: { background: '#fff', border: '0.5px solid #d1d5db', borderRadius: 10, padding: '12px 16px' } },
+                  e('div', { style: { fontSize: 11, color: '#6b7280', marginBottom: 3 } }, label),
+                  e('div', { style: { fontSize: 24, fontWeight: 500, color } }, val),
+                  sub && e('div', { style: { fontSize: 11, color: '#9ca3af', marginTop: 2 } }, sub)
+                )
+              )
+            ),
+            e('div', { style: { fontSize: 12, fontWeight: 500, color: NAVY, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.6 } }, 'Progress by training level'),
+            e('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 } },
+              ...levelStats.map(s => e(LevelCard, { key: s.lvl, s }))
+            ),
+            e(TrainerSection, null)
+          )
+    ),
+
+    // ── ROSTER ──
+    activeTab === 'roster' && e('div', null,
+      trainees.length === 0
+        ? e('div', null, e(UploadZone, null), e(EmptyState, null))
+        : e('div', null,
+            e('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 } },
+              e('input', { type: 'text', placeholder: 'Search name or site…', value: search, onChange: ev => setSearch(ev.target.value),
+                style: { flex: 1, minWidth: 160, padding: '6px 10px', border: '0.5px solid #d1d5db', borderRadius: 7, fontSize: 13 } }),
+              e('select', { value: filterLevel, onChange: ev => setFilterLevel(ev.target.value),
+                style: { padding: '6px 8px', border: '0.5px solid #d1d5db', borderRadius: 7, fontSize: 13 } },
+                e('option', { value: 'All' }, 'All levels'),
+                ...LEVELS.map(l => e('option', { key: l }, l))
+              ),
+              e('select', { value: filterStatus, onChange: ev => setFilterStatus(ev.target.value),
+                style: { padding: '6px 8px', border: '0.5px solid #d1d5db', borderRadius: 7, fontSize: 13 } },
+                e('option', { value: 'All' }, 'All statuses'),
+                e('option', null, 'Certified'), e('option', null, 'Trained'), e('option', null, 'Not trained')
+              ),
+              e('div', { style: { fontSize: 13, color: '#6b7280', alignSelf: 'center' } }, roster.length + ' of ' + trainees.length)
+            ),
+            e('div', { style: { overflowX: 'auto', borderRadius: 10, border: '0.5px solid #d1d5db' } },
+              e('table', { style: { width: '100%', borderCollapse: 'collapse', minWidth: 940 } },
+                e('thead', null,
+                  e('tr', null,
+                    [['name','Name'],['site','Site'],['score','Score'],['examPassed','Exam'],['training','Training'],['cipCompleted','CIP'],['status','Status'],['trainerLevel','Trainer level'],['trainerStatus','Trainer status']].map(([col, label]) =>
+                      e('th', { key: col, style: thSt, onClick: () => toggleSort(col) }, label + arr(col))
+                    )
+                  )
+                ),
+                e('tbody', null,
+                  roster.map((t, idx) =>
+                    e('tr', { key: t.id, style: { background: idx % 2 === 0 ? '#fff' : '#f9fafb' } },
+                      e('td', { style: { ...tdSt, fontWeight: 500, whiteSpace: 'nowrap' } }, t.name),
+                      e('td', { style: tdSt },
+                        e('input', { type: 'text', value: t.site, placeholder: 'Enter site…', onChange: ev => update(t.id, 'site', ev.target.value),
+                          style: { fontSize: 12, padding: '3px 6px', border: '0.5px solid #d1d5db', borderRadius: 5, background: '#fff', width: 110 } })
+                      ),
+                      e('td', { style: { ...tdSt, textAlign: 'center', fontWeight: 500, color: t.examPassed ? '#2d7a3a' : '#b91c1c' } }, t.score),
+                      e('td', { style: { ...tdSt, textAlign: 'center' } }, examBadge(t.examPassed)),
+                      e('td', { style: tdSt },
+                        e('select', { value: t.training, onChange: ev => update(t.id, 'training', ev.target.value), style: selectSt },
+                          ...LEVELS.map(l => e('option', { key: l }, l))
+                        )
+                      ),
+                      e('td', { style: { ...tdSt, textAlign: 'center' } },
+                        e('input', { type: 'checkbox', checked: t.cipCompleted, onChange: ev => update(t.id, 'cipCompleted', ev.target.checked),
+                          style: { width: 15, height: 15, cursor: 'pointer', accentColor: ORANGE } })
+                      ),
+                      e('td', { style: { ...tdSt, textAlign: 'center' } }, statusBadge(getStatus(t))),
+                      e('td', { style: tdSt },
+                        e('select', { value: t.trainerLevel, onChange: ev => update(t.id, 'trainerLevel', ev.target.value),
+                          style: { ...selectSt, color: t.trainerLevel !== 'None' ? NAVY : '#6b7280' } },
+                          e('option', { value: 'None' }, '— None —'),
+                          ...LEVELS.map(l => e('option', { key: l }, l))
+                        )
+                      ),
+                      e('td', { style: tdSt },
+                        e('select', { value: t.trainerStatus, onChange: ev => update(t.id, 'trainerStatus', ev.target.value),
+                          style: { ...selectSt, color: t.trainerStatus === 'Certified' ? '#92400e' : t.trainerStatus === 'In-training' ? '#075985' : '#6b7280' } },
+                          e('option', { value: 'None' }, '— None —'),
+                          e('option', { value: 'In-training' }, 'In training'),
+                          e('option', { value: 'Certified' }, 'Certified')
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            ),
+            e('div', { style: { fontSize: 11, color: '#9ca3af', marginTop: 8 } },
+              'Site name is read from the file automatically. You can still edit it manually if needed.'
+            )
+          )
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
