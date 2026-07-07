@@ -2466,6 +2466,14 @@ function viewAnalytics(){
   const regionRows=Object.values(regionMap).sort((a,b)=>b.t-a.t);
 
   const allQCols=new Set();allRows.forEach(r=>Object.keys(r.questions||{}).forEach(c=>allQCols.add(c)));
+  // Build question label map from stored data
+  const d2anal=data||SAMPLE;
+  const qLabels={};
+  const qLabelSrc=d2anal.questionLabels||{};
+  Object.values(qLabelSrc).forEach(tierMap=>{
+    Object.entries(tierMap).forEach(([k,v])=>{if(v&&!qLabels[k])qLabels[k]=v;});
+  });
+
   const qStats=[...allQCols].sort().map(col=>{
     const rows=allRows.filter(r=>r.questions&&r.questions[col]!==undefined);
     const wrong=rows.filter(r=>{
@@ -2512,7 +2520,10 @@ function viewAnalytics(){
     const qPanel=document.createElement("div");qPanel.className="panel";
     qPanel.innerHTML=`<div class="panel-title">Questions Answered Incorrectly Most Often</div>${
       qStats.slice(0,10).map(q=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        <div style="width:80px;font-weight:600;color:#374151;flex-shrink:0">${q.col}</div>
+        <div style="flex-shrink:0;min-width:80px;max-width:260px">
+          <span style="font-weight:700;color:#002664;font-size:12px">${q.col}</span>
+          ${qLabels[q.col]?`<span style="font-size:11px;color:#6b7280;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px" title="${qLabels[q.col]}">${qLabels[q.col]}</span>`:""}
+        </div>
         <div class="pbar" style="flex:1"><div class="fill" style="width:${q.pw}%;background:${q.pw>50?"#b91c1c":ORANGE}"></div></div>
         <div style="font-size:11px;color:${q.pw>50?"#b91c1c":ORANGE};width:50px;text-align:right;font-weight:600">${q.pw}% wrong</div>
         <div style="font-size:10px;color:#9ca3af;width:44px;text-align:right">${q.wrong}/${q.t}</div>
