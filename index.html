@@ -267,7 +267,9 @@ let donutTier = "All";
 
 // ── Helpers ───────────────────────────────────────────────────────
 const norm = s => (s||"").toString().trim();
-const normLow = s => norm(s).toLowerCase();
+// Strip trailing * and other decoration characters from column headers
+const normCol = s => norm(s).replace(/[*#!?:]+$/, "").trim();
+const normLow = s => normCol(s).toLowerCase();
 function fmtSavings(n){if(n>=1e6)return"$"+(n/1e6).toFixed(n%1e6===0?0:1)+"M";if(n>=1e3)return"$"+(n/1e3).toFixed(n%1e3===0?0:1)+"K";return"$"+Math.round(n).toLocaleString();}
 function pct(a,b){return b?Math.round((a/b)*100):0;}
 const isApproved = p => {const v=norm(p.approved).toLowerCase();return v==="yes"||v==="true"||v==="1";};
@@ -360,8 +362,12 @@ function html(str){const d=document.createElement("div");d.innerHTML=str;return 
 
 // ── Find column ───────────────────────────────────────────────────
 function findCol(keys,...terms){
+  // Exact match (after stripping * etc from header)
   for(const t of terms){const m=keys.find(k=>normLow(k)===normLow(t));if(m)return m;}
+  // Partial match
   for(const t of terms){const m=keys.find(k=>normLow(k).includes(normLow(t)));if(m)return m;}
+  // Also try matching term against key with asterisks stripped
+  for(const t of terms){const m=keys.find(k=>normCol(k).toLowerCase().includes(normLow(t)));if(m)return m;}
   return null;
 }
 
