@@ -474,6 +474,45 @@ const SAMPLE = {
 SAMPLE.allExamRows = SAMPLE.exams.map(e=>({...e,questions:e.questions||{}}));
 
 // ── Persistence ───────────────────────────────────────────────────
+function snapshotData(){
+  // Save a timestamped backup to Firestore before destructive operations
+  if(!data||!usingLive)return;
+  const ts=new Date().toISOString().slice(0,19).replace('T','_').replace(/:/g,'-');
+  const snap={...data,snapshotAt:new Date().toISOString()};
+  // Keep last 10 snapshots
+  db.collection("lean_snapshots").doc(ts).set(snap)
+    .then(()=>{
+      // Trim old snapshots — keep only 10 most recent
+      db.collection("lean_snapshots").orderBy("snapshotAt","asc").get()
+        .then(qs=>{
+          if(qs.size>10){
+            const toDelete=qs.docs.slice(0,qs.size-10);
+            toDelete.forEach(d=>d.ref.delete());
+          }
+        });
+      console.info("Snapshot saved:",ts);
+    })
+    .catch(err=>console.error("Snapshot failed:",err));
+}
+
+// ── Weekly auto-backup ────────────────────────────────────────────
+function checkWeeklyBackup(){
+  const lastBackup=localStorage.getItem("dsv_last_backup");
+  const now=new Date();
+  const weekAgo=new Date(now-7*24*60*60*1000);
+  if(!lastBackup||new Date(lastBackup)<weekAgo){
+    if(data&&usingLive){
+      const ts=new Date().toISOString().slice(0,10);
+      db.collection("lean_snapshots").doc("weekly_"+ts).set({
+        ...data,snapshotAt:new Date().toISOString(),type:"weekly"
+      }).then(()=>{
+        localStorage.setItem("dsv_last_backup",now.toISOString());
+        showSave("✓ Weekly backup saved","#86efac");
+      });
+    }
+  }
+}
+
 function saveData(d){
   // Save to localStorage as immediate fallback
   try{localStorage.setItem(STORAGE_KEY,JSON.stringify(d));}catch(e){}
@@ -532,6 +571,7 @@ function loadData(){
             try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data));}catch(e){}
             document.getElementById("sample-banner").style.display="none";
             showSave("✓ Synced","#86efac");
+            checkWeeklyBackup();
             render(); // Re-render with fresh cloud data
           })
           .catch(()=>{
@@ -902,19 +942,21 @@ function parseExcelFile(wb){
     // For MS Forms: columns starting with "Points - " are 1=correct, 0=incorrect
     const questions={};
     let qNum=1;
+    const qTextMap={}; // Q1 -> "actual question text"
     k.forEach(col=>{
       const trimmed=col.trim();
-      // Standard Q1, Q2... pattern
-      if(/^q\d+$/i.test(trimmed)||/^question\s*\d+/i.test(trimmed)){
-        questions[trimmed]=norm(r[col]);
+      // Standard Q1, Q2... pattern (from template with Q1, Q2 headers)
+      if(/^q\d+$/i.test(normCol(trimmed))||/^question\s*\d+/i.test(normCol(trimmed))){
+        questions[normCol(trimmed).toUpperCase()]=norm(r[col]);
       }
       // MS Forms "Points - [question text]" pattern: 1=correct, 0=incorrect
       else if(/^points\s*-\s*/i.test(trimmed)){
-        // Skip metadata points cols (Total points, Points - Name, Points - Email etc)
         const qLabel=trimmed.replace(/^points\s*-\s*/i,"").trim();
-        const skip=["name","name1","email","email1","country","site name","date","trainer","training mode"];
-        if(!skip.some(s=>qLabel.toLowerCase()===s)){
-          questions["Q"+qNum]=r[col]; // store raw 1/0
+        const skip=["name","name1","email","email1","country","site name","date","trainer","training mode","total"];
+        if(!skip.some(s=>qLabel.toLowerCase()===s)&&qLabel.length>2){
+          const qKey="Q"+qNum;
+          questions[qKey]=r[col]; // store raw 1/0
+          qTextMap[qKey]=qLabel;  // store full question text
           qNum++;
         }
       }
@@ -923,18 +965,29 @@ function parseExcelFile(wb){
     const key=email+"|"+tier;
     if(!firstMap[key]||date<firstMap[key].date)firstMap[key]={score,date,passed:score>=16};
     if(!bestMap[key]||score>bestMap[key].score)bestMap[key]={email,tier,score,passed:score>=16,date,questions,learnerName,site,country,trainer};
-    return{email,tier,score,date,passed:score>=16,questions,learnerName,site,country,trainer};
+    return{email,tier,score,date,passed:score>=16,questions,qTextMap,learnerName,site,country,trainer};
   });
   const exams=Object.values(bestMap);
   const fa=Object.values(firstMap);
   const firstPassRate=fa.length?Math.round((fa.filter(x=>x.passed).length/fa.length)*100):0;
   const avgScore=exams.length?+(exams.reduce((s,x)=>s+x.score,0)/exams.length).toFixed(1):0;
 
+  // Build question label map from all rows — {tier: {Q1: "text",...}}
+  const questionLabels={};
+  allRows.forEach(row=>{
+    if(!row.qTextMap||!Object.keys(row.qTextMap).length)return;
+    const t=row.tier||"All";
+    if(!questionLabels[t])questionLabels[t]={};
+    Object.entries(row.qTextMap).forEach(([k,v])=>{
+      if(v&&!questionLabels[t][k])questionLabels[t][k]=v;
+    });
+  });
+
 
   const projects=projRaw.map(r=>{const k=Object.keys(r);return{email:normLow(r[findCol(k,"email")||""]),tier:norm(r[findCol(k,"tier")||""]),submitted:xlSerialToDate(r[findCol(k,"date submitted","submitted","date submitted *")||""]),approved:norm(r[findCol(k,"approved")||""]),savings:parseFloat((r[findCol(k,"savings ($)","savings","cost savings")||""]||"").toString().replace(/[$,()]/g,""))||0};}).filter(p=>p.email);
   const trainers=trRaw.map(r=>{const k=Object.keys(r);const yn=key=>{const v=norm(r[findCol(k,key)||""]).toLowerCase();return v==="yes"||v==="true";};return{name:norm(r[findCol(k,"name","trainer name","full name")||""]),email:normLow(r[findCol(k,"email","email / id","email/id")||""]||""),site:norm(r[findCol(k,"site","location")||""]||""),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),customer:norm(r[findCol(k,"customer")||""]),q1a:yn("qualified 1a"),q1b:yn("qualified 1b"),q1c:yn("qualified 1c"),date1a:xlSerialToDate(r[findCol(k,"date certified 1a","date 1a")||""]),date1b:xlSerialToDate(r[findCol(k,"date certified 1b","date 1b")||""]),date1c:xlSerialToDate(r[findCol(k,"date certified 1c","date 1c")||""]),lead1a:norm(r[findCol(k,"lead trainer 1a","lead 1a")||""]||""),lead1b:norm(r[findCol(k,"lead trainer 1b","lead 1b")||""]||""),lead1c:norm(r[findCol(k,"lead trainer 1c","lead 1c")||""]||"")};}).filter(t=>t.name);
 
-  return{workshops,attendees,exams,allExamRows:allRows,firstPassRate,avgScore,projects,trainers};
+  return{workshops,attendees,exams,allExamRows:allRows,firstPassRate,avgScore,projects,trainers,questionLabels};
 }
 
 // ── Views ─────────────────────────────────────────────────────────
@@ -2079,8 +2132,34 @@ function viewUpload(){
   expAllBtn.style.marginBottom="20px";
   expAllBtn.innerHTML="📥 Export / Backup All Data";
   expAllBtn.onclick=exportAll;
+
+  // Restore snapshot button
+  const restoreBtn=document.createElement("button");
+  restoreBtn.className="export-btn";
+  restoreBtn.style.cssText="margin-bottom:20px;background:#b91c1c;";
+  restoreBtn.innerHTML="🔄 Restore from Snapshot";
+  restoreBtn.onclick=()=>{
+    db.collection("lean_snapshots").orderBy("snapshotAt","desc").limit(10).get()
+      .then(qs=>{
+        if(qs.empty){alert("No snapshots found.");return;}
+        const opts=qs.docs.map(d=>`${d.id}: ${d.data().snapshotAt||d.id}`).join("\n");
+        const choice=prompt("Available snapshots (enter the ID to restore):\n\n"+opts);
+        if(!choice)return;
+        const doc=qs.docs.find(d=>d.id===choice.trim());
+        if(!doc){alert("Snapshot not found.");return;}
+        if(!confirm("Restore snapshot "+choice+"? This will overwrite current data."))return;
+        snapshotData(); // snapshot current before restoring
+        data={...doc.data()};
+        usingLive=true;
+        saveData(data);
+        render();
+        showSave("✓ Restored from snapshot "+choice,"#86efac");
+      })
+      .catch(err=>{alert("Error loading snapshots: "+err.message);});
+  };
   d.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div class="page-title">Upload Data</div></div>`;
   d.querySelector("div").appendChild(expAllBtn);
+  d.querySelector("div").appendChild(restoreBtn);
   const panel=document.createElement("div");panel.className="panel";panel.style.maxWidth="580px";
 
   const tabOpts=[{id:"full",label:"Full file (all tabs)"},{id:"workshops",label:"Workshops only"},{id:"attendees",label:"Attendees only"},{id:"exams",label:"Exam Results only"},{id:"projects",label:"Projects only"},{id:"trainers",label:"Trainers only"}];
@@ -2097,6 +2176,12 @@ function viewUpload(){
         <label><input type="radio" name="up-mode" value="replace"${uploadMode==="replace"?" checked":""}> Replace — wipe existing data for this tab</label>
         <label><input type="radio" name="up-mode" value="append"${uploadMode==="append"?" checked":""}> Append — add new rows to existing data</label>
       </div>
+      <div id="replace-confirm-wrap" style="display:${uploadMode==="replace"?"block":"none"};margin-top:12px;padding:12px;background:#fff1f2;border:1px solid #fca5a5;border-radius:8px">
+        <div style="font-size:12px;font-weight:600;color:#b91c1c;margin-bottom:6px">⚠ Replace will overwrite all existing data. A snapshot will be saved first.</div>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">Type <strong>REPLACE</strong> to confirm:</div>
+        <input type="text" id="replace-confirm-input" placeholder="Type REPLACE here" autocomplete="off"
+          style="padding:8px 12px;border:2px solid #fca5a5;border-radius:7px;font-size:13px;font-family:Arial,sans-serif;width:200px;text-transform:uppercase">
+      </div>
     </div>
     <div class="upload-zone" id="upload-zone" style="margin-top:16px">
       <input type="file" id="file-input" accept=".xlsx,.xls" style="display:none">
@@ -2110,7 +2195,13 @@ function viewUpload(){
 
   setTimeout(()=>{
     document.querySelectorAll('input[name="up-tab"]').forEach(r=>{r.onchange=e=>{uploadTab=e.target.value;};});
-    document.querySelectorAll('input[name="up-mode"]').forEach(r=>{r.onchange=e=>{uploadMode=e.target.value;};});
+    document.querySelectorAll('input[name="up-mode"]').forEach(r=>{r.onchange=e=>{
+      uploadMode=e.target.value;
+      const wrap=document.getElementById("replace-confirm-wrap");
+      if(wrap)wrap.style.display=uploadMode==="replace"?"block":"none";
+      const inp=document.getElementById("replace-confirm-input");
+      if(inp)inp.value="";
+    };});
     const zone=document.getElementById("upload-zone");
     const fi=document.getElementById("file-input");
     zone.onclick=()=>fi.click();
@@ -2127,9 +2218,21 @@ function viewUpload(){
         try{
           const wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
           if(!data)data={...SAMPLE};
+
+          // Require "REPLACE" confirmation for destructive replace operations
+          if(uploadMode==="replace"){
+            const conf=document.getElementById("replace-confirm-input");
+            if(!conf||conf.value.trim().toUpperCase()!=="REPLACE"){
+              msg.innerHTML='<div class="alert-error">⚠ Type <strong>REPLACE</strong> in the confirmation box to overwrite existing data.</div>';
+              return;
+            }
+            // Take a snapshot before replacing
+            snapshotData();
+          }
+
           if(uploadTab==="full"){
             const parsed=parseExcelFile(wb);
-            data={...data,...parsed};
+            data={...data,...parsed};if(parsed.questionLabels&&Object.keys(parsed.questionLabels).length){data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};}
           } else {
             function sheet(name){
               const sn=wb.SheetNames.find(n=>normLow(n).includes(normLow(name)));
@@ -2257,6 +2360,7 @@ function viewUpload(){
               data.allExamRows=parsed.allExamRows;
               data.firstPassRate=parsed.firstPassRate;
               data.avgScore=parsed.avgScore;
+              if(parsed.questionLabels)data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
             } else if(uploadTab==="projects"){
               const rows=sheet("project").map(r=>{const k=Object.keys(r);return{email:normLow(r[findCol(k,"email")||""]),tier:norm(r[findCol(k,"tier")||""]),submitted:norm(r[findCol(k,"submitted")||""]),approved:norm(r[findCol(k,"approved")||""]),savings:parseFloat((r[findCol(k,"savings ($)","savings","cost savings","saving")||""]||"").toString().replace(/[$,()]/g,""))||0};}).filter(p=>p.email);
               data.projects=uploadMode==="replace"?rows:[...data.projects,...rows];
