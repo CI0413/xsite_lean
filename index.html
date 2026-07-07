@@ -261,6 +261,7 @@ let learnerSearch = "";
 let workshopSearch = "";
 let workshopSortDir = "desc"; // desc = newest first
 let execTierFilter = {trained:"All", certified:"All"};
+let tierStatusFilter = "All";
 let activeTierTab = "Lean 1A";
 let activeAnalyticsTier = "All";
 let addWorkshopForm = {tier:"",date:"",region:"",country:"",site:"",customer:"",leadTrainer:"",coTrainer:""};
@@ -1632,8 +1633,19 @@ function viewByTier(){
   window._tierLearners[tier]=learners;
 
   const lp=document.createElement("div");lp.className="panel";
-  lp.innerHTML=`<div class="panel-title">${tier} Learners (${learners.length})</div><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Site</th><th>Customer</th><th>Region</th><th class="center">Score</th><th>Status</th></tr></thead><tbody>${
-    learners.map((l,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
+  lp.innerHTML=`<div class="panel-title">${tier} Learners (${learners.length})</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Filter by status:</span>
+          ${["All","No Exam Yet","Attended Not Passed","Trained","Certified"].map(s=>`
+            <button onclick="tierStatusFilter='${s}';render();"
+              style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${tierStatusFilter===s?"#002664":"#d1d5db"};background:${tierStatusFilter===s?"#002664":"#fff"};color:${tierStatusFilter===s?"#fff":"#6b7280"}">${s}</button>`).join("")}
+        </div>
+        <button onclick="exportTierLearners('${tier}',window._tierLearners&&window._tierLearners['${tier}'])"
+          style="padding:5px 14px;background:#002664;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif">📥 Export</button>
+      </div>
+      <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Site</th><th>Customer</th><th>Region</th><th class="center">Score</th><th>Status</th></tr></thead><tbody>${
+    (tierStatusFilter==="All"?learners:learners.filter(l=>l.status===tierStatusFilter)).map((l,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
       <td style="font-weight:600;white-space:nowrap">${l.name}</td>
       <td style="font-size:13px;color:#6b7280">${l.email}</td>
       <td style="font-size:12px">${l.site||"—"}</td>
