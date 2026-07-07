@@ -275,6 +275,11 @@ function pct(a,b){return b?Math.round((a/b)*100):0;}
 const isApproved = p => {const v=norm(p.approved).toLowerCase();return v==="yes"||v==="true"||v==="1";};
 // Returns true if learner should count in ops KPIs
 // Non-ops: type field contains "non-ops", "non ops", "management", "support", "admin", "salary" etc
+function isManualCertified(email, tier){
+  const d2=data||SAMPLE;
+  return !!(d2.certOverrides&&d2.certOverrides[email+"||"+tier]);
+}
+
 function isOps(learnerType){
   if(!learnerType)return true; // no type = ops by default
   const v=learnerType.toLowerCase().trim();
@@ -940,7 +945,7 @@ function viewExecutive(){
   const totalL=fd.opsEmails.size;
   const trained=new Set(fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)).map(x=>x.email)).size;
   const trainedEmailTiersExec=new Set(fd.exams.filter(x=>x.passed).map(x=>x.email+"||"+x.tier));
-  const certified=new Set(fd.projects.filter(p=>isApproved(p)&&trainedEmailTiersExec.has(p.email+"|"+p.tier)).map(p=>p.email)).size;
+  const certified=new Set(fd.projects.filter(p=>isApproved(p)&&trainedEmailTiersExec.has(p.email+"||"+p.tier)).map(p=>p.email)).size;
   const approvedProjects=fd.projects.filter(isApproved);
   const totalSavings=approvedProjects.reduce((s,p)=>s+p.savings,0);
 
@@ -1101,6 +1106,7 @@ function viewLearners(){
     const exams=fd.exams.filter(x=>x.email===l.email);
     const passed=exams.filter(x=>x.passed);
     const approved=fd.projects.filter(p=>p.email===l.email&&isApproved(p)&&fd.exams.find(x=>x.email===l.email&&x.tier===p.tier&&x.passed));
+    const manualCertTiers=TIERS.filter(t=>isManualCertified(l.email,t));
     const attendedWsIds=[...new Set(fd.attendees.filter(a=>a.email===l.email).map(a=>a.workshopId))];
     const trainerSet=new Set();
     attendedWsIds.forEach(wid=>{const ws=wsMap[wid];if(ws&&ws.leadTrainer)trainerSet.add(ws.leadTrainer);});
@@ -1115,7 +1121,7 @@ function viewLearners(){
       ...l,
       trainers:[...trainerSet].sort(),
       tiersTrained:[...new Set(passed.map(x=>x.tier))],
-      tiersApproved:[...new Set(approved.map(p=>p.tier))],
+      tiersApproved:[...new Set([...approved.map(p=>p.tier),...manualCertTiers])],
       bestScores:exams.reduce((m,x)=>{m[x.tier]=x.score;return m;},{}),
       projectsByTier,
     };
@@ -1311,6 +1317,10 @@ window.showLearnerProfile = function(email){
         const b=TIER_BG[t.tier]||"#f3f4f6";
         const sc2=STATUS_COLOR[t.status]||"#9ca3af";
         const sb2=STATUS_BG[t.status]||"#f3f4f6";
+        const manualCert=isManualCertified(email,t.tier);
+        const overrideBtn=`<button onclick="toggleCertOverride('${email}','${t.tier}')"
+          style="margin-left:auto;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${manualCert?"#b91c1c":"#00682A"};background:${manualCert?"#fee2e2":"#dcfce7"};color:${manualCert?"#b91c1c":"#00682A"}">
+          ${manualCert?"✕ Remove Override":"★ Mark Certified"}</button>`;
         return`<div class="tier-row">
           <span class="tr-tier" style="color:${c}">${t.tier}</span>
           <span class="tr-badge" style="background:${sb2};color:${sc2}">${t.status}</span>
@@ -1320,6 +1330,7 @@ window.showLearnerProfile = function(email){
             ${t.daysToTrain!==null?` · Trained in ${fmtDays(t.daysToTrain)}`:""}
             ${t.daysToCert!==null?` · Cert in ${fmtDays(t.daysToCert)}`:""}
           </span>
+          ${overrideBtn}
         </div>`;
       }).join("")}
     </div>`:""}
@@ -1348,6 +1359,25 @@ window.showLearnerProfile = function(email){
   const modal = document.getElementById("profile-modal");
   modal.classList.add("open");
   modal.onclick = e=>{if(e.target===modal)modal.classList.remove("open");};
+};
+
+// ── Manual certification override ────────────────────────────────
+window.toggleCertOverride = function(email, tier){
+  if(!data)data={...SAMPLE};
+  if(!data.certOverrides)data.certOverrides={};
+  const key=email+"||"+tier;
+  if(data.certOverrides[key]){
+    delete data.certOverrides[key];
+    showSave("Override removed","#fca5a5");
+  } else {
+    data.certOverrides[key]=true;
+    showSave("✓ Marked as Certified","#86efac");
+  }
+  usingLive=true;
+  saveData(data);
+  // Refresh profile modal
+  window.showLearnerProfile(email);
+  render();
 };
 
 // Global cert viewer (called from inline onclick)
