@@ -2062,12 +2062,15 @@ function viewUpload(){
     fi.onchange=e=>{handleUploadFile(e.target.files[0]);fi.value="";};
 
     function handleUploadFile(file){
-      if(!file)return;
+      console.log("handleUploadFile called, file:", file?file.name:"none", "uploadTab:", uploadTab);
+      if(!file){console.log("No file provided");return;}
       const msg=document.getElementById("up-msg");
       const reader=new FileReader();
       reader.onload=ev=>{
         try{
+          console.log("FileReader onload triggered, result size:", ev.target.result.byteLength);
           const wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
+          console.log("XLSX parsed, SheetNames:", wb.SheetNames);
           if(!data)data={...SAMPLE};
           if(uploadTab==="full"){
             const parsed=parseExcelFile(wb);
