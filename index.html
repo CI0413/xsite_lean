@@ -784,7 +784,27 @@ function parseExcelFile(wb){
   function sheet(name){
     const sn=wb.SheetNames.find(n=>normLow(n).includes(normLow(name)));
     if(!sn){console.warn("Sheet not found for:",name,"Available:",wb.SheetNames);return[];}
-    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:""});
+    const ws=wb.Sheets[sn];
+    // Try reading normally first
+    let rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+    // If first row looks like a title (has no recognisable column keys — all __EMPTY or tab name)
+    if(rows.length){
+      const firstKeys=Object.keys(rows[0]);
+      const looksLikeTitle=firstKeys.every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_")||normLow(k)===normLow(name)||k===sn);
+      if(looksLikeTitle){
+        // Skip first row and use second row as header
+        rows=XLSX.utils.sheet_to_json(ws,{defval:"",range:1});
+        console.log("Skipped title row for sheet '"+sn+"'");
+      }
+    }
+    // Strip any legend/note rows at the bottom (rows where all values are blank or contain "required" text)
+    rows=rows.filter(r=>{
+      const vals=Object.values(r).map(v=>(v||"").toString().trim()).filter(Boolean);
+      if(!vals.length)return false;
+      const joined=vals.join(" ").toLowerCase();
+      if(joined.includes("required for dashboard")||joined.includes("highlighted = optional")||joined.includes("delete the"))return false;
+      return true;
+    });
     console.log("Sheet '"+sn+"' -> "+rows.length+" rows, keys:", rows.length?Object.keys(rows[0]):[]);
     return rows;
   }
@@ -2076,7 +2096,25 @@ function viewUpload(){
             const parsed=parseExcelFile(wb);
             data={...data,...parsed};
           } else {
-            function sheet(name){const sn=wb.SheetNames.find(n=>normLow(n).includes(normLow(name)));return sn?XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:""}):[]; }
+            function sheet(name){
+              const sn=wb.SheetNames.find(n=>normLow(n).includes(normLow(name)));
+              if(!sn)return[];
+              const ws2=wb.Sheets[sn];
+              let rows2=XLSX.utils.sheet_to_json(ws2,{defval:""});
+              if(rows2.length){
+                const fk=Object.keys(rows2[0]);
+                if(fk.every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_")||normLow(k)===normLow(name)||k===sn)){
+                  rows2=XLSX.utils.sheet_to_json(ws2,{defval:"",range:1});
+                }
+              }
+              rows2=rows2.filter(r=>{
+                const vals=Object.values(r).map(v=>(v||"").toString().trim()).filter(Boolean);
+                if(!vals.length)return false;
+                const j=vals.join(" ").toLowerCase();
+                return !j.includes("required for dashboard")&&!j.includes("highlighted = optional")&&!j.includes("delete the");
+              });
+              return rows2;
+            }
             function dedup(arr,k){const s=new Set();return arr.filter(x=>{if(s.has(x[k]))return false;s.add(x[k]);return true;});}
             if(uploadTab==="workshops"){
               const rows=sheet("workshop").map(r=>{const k=Object.keys(r);return{id:genId(),tier:norm(r[findCol(k,"tier")||""]),date:norm(r[findCol(k,"date")||""]),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),site:norm(r[findCol(k,"site")||""]),customer:norm(r[findCol(k,"customer")||""]),leadTrainer:norm(r[findCol(k,"lead trainer","lead")||""]),coTrainer:norm(r[findCol(k,"co-trainer","co trainer")||""])};}).filter(w=>w.tier);
