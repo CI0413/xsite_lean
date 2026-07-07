@@ -808,7 +808,6 @@ function parseExcelFile(wb){
         );
       if(looksLikeTitle){
         rows=XLSX.utils.sheet_to_json(ws,{defval:"",range:1});
-        console.log("Skipped title row for sheet '"+sn+"', new keys:", rows.length?Object.keys(rows[0]):[]);
       }
     }
     // Strip any legend/note rows at the bottom (rows where all values are blank or contain "required" text)
@@ -819,16 +818,12 @@ function parseExcelFile(wb){
       if(joined.includes("required for dashboard")||joined.includes("highlighted = optional")||joined.includes("delete the"))return false;
       return true;
     });
-    console.log("Sheet '"+sn+"' -> "+rows.length+" rows, keys:", rows.length?Object.keys(rows[0]):[]);
     return rows;
   }
   const wsRaw=sheet("workshop"), attRaw=sheet("attend"), examRaw=sheet("exam"), projRaw=sheet("project"), trRaw=sheet("trainer");
-  console.log("Raw counts - ws:",wsRaw.length,"att:",attRaw.length,"exam:",examRaw.length,"proj:",projRaw.length,"tr:",trRaw.length);
 
   const workshops=wsRaw.map(r=>{const k=Object.keys(r);const _ws=norm(r[findCol(k,"site")||""]||""),_wc=norm(r[findCol(k,"customer","client","account")||""]||"");
-    const _dateCol=findCol(k,"date","workshop date","training date");
-    const _dateRaw=r[_dateCol||""];
-    if(Object.keys(r).indexOf(_dateCol)>=0||Object.keys(r).length<5)console.log("WS date col:",_dateCol,"raw:",_dateRaw,"converted:",xlSerialToDate(_dateRaw));
+    const _dateRaw=r[findCol(k,"date","workshop date","training date")||""];
     return{id:norm(r[findCol(k,"workshop id","id","ws id")||""]),tier:norm(r[findCol(k,"tier")||""]),date:xlSerialToDate(_dateRaw),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),site:_ws,customer:extractCustomer(_ws,_wc),leadTrainer:norm(r[findCol(k,"lead trainer","lead")||""]),coTrainer:norm(r[findCol(k,"co-trainer","co trainer","cotrainer")||""])};}).filter(w=>w.tier||w.date);
   const attendees=attRaw.map(r=>{const k=Object.keys(r);const _wsId=norm(r[findCol(k,"workshop id","workshop")||""]||"");const _em=normLow(r[findCol(k,"email","email / id","email/id","badge","employee id","id")||""]||"");const _nm=norm(r[findCol(k,"name","full name")||""]||"");const _st=norm(r[findCol(k,"site","location")||""]||"");const _cu=norm(r[findCol(k,"customer","client","account")||""]||"");const _co=norm(r[findCol(k,"country")||""]||"");const _re=norm(r[findCol(k,"region")||""]||"");return{workshopId:_wsId,email:_em,name:_nm,site:_st,customer:extractCustomer(_st,_cu),country:_co,region:_re,learnerType:norm(r[findCol(k,"learner type","type")||""]||""),role:norm(r[findCol(k,"role","job title","position")||""]||""),department:norm(r[findCol(k,"department","dept")||""]||"")};}).map(a=>{
     if((!a.email||!a.email.includes("@"))&&a.name){
@@ -993,7 +988,7 @@ function viewExecutive(){
       <div class="kpi-card" style="border-top-color:#E18635">
         <div class="kpi-header"><div class="kpi-label">Total Trained</div><div class="kpi-icon">✅</div></div>
         <div class="kpi-value" style="color:#002664">${trained}</div>
-        <div class="kpi-sub">${pct(trained,totalL)}% of attendees</div>
+        <div class="kpi-sub">${pct(trained,totalL)}% of attendees · unique, any tier</div>
       </div>
       <div class="kpi-card" style="border-top-color:#E18635">
         <div class="kpi-header"><div class="kpi-label">Certified</div><div class="kpi-icon">🏅</div></div>
@@ -2125,15 +2120,12 @@ function viewUpload(){
     fi.onchange=e=>{handleUploadFile(e.target.files[0]);fi.value="";};
 
     function handleUploadFile(file){
-      console.log("handleUploadFile called, file:", file?file.name:"none", "uploadTab:", uploadTab);
-      if(!file){console.log("No file provided");return;}
+      if(!file){return;}
       const msg=document.getElementById("up-msg");
       const reader=new FileReader();
       reader.onload=ev=>{
         try{
-          console.log("FileReader onload triggered, result size:", ev.target.result.byteLength);
           const wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
-          console.log("XLSX parsed, SheetNames:", wb.SheetNames);
           if(!data)data={...SAMPLE};
           if(uploadTab==="full"){
             const parsed=parseExcelFile(wb);
@@ -2161,7 +2153,7 @@ function viewUpload(){
             }
             function dedup(arr,k){const s=new Set();return arr.filter(x=>{if(s.has(x[k]))return false;s.add(x[k]);return true;});}
             if(uploadTab==="workshops"){
-              const rows=sheet("workshop").map(r=>{const k=Object.keys(r);return{id:genId(),tier:norm(r[findCol(k,"tier")||""]),date:norm(r[findCol(k,"date")||""]),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),site:norm(r[findCol(k,"site")||""]),customer:norm(r[findCol(k,"customer")||""]),leadTrainer:norm(r[findCol(k,"lead trainer","lead")||""]),coTrainer:norm(r[findCol(k,"co-trainer","co trainer")||""])};}).filter(w=>w.tier);
+              const rows=sheet("workshop").map(r=>{const k=Object.keys(r);const _wos=norm(r[findCol(k,"site")||""]||""),_woc=norm(r[findCol(k,"customer","client","account")||""]||"");return{id:norm(r[findCol(k,"workshop id","id")||""])||genId(),tier:norm(r[findCol(k,"tier")||""]),date:xlSerialToDate(r[findCol(k,"date","workshop date","training date")||""]),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),site:norm(r[findCol(k,"site")||""]),customer:norm(r[findCol(k,"customer")||""]),leadTrainer:norm(r[findCol(k,"lead trainer","lead")||""]),coTrainer:norm(r[findCol(k,"co-trainer","co trainer")||""])};}).filter(w=>w.tier);
               data.workshops=uploadMode==="replace"?rows:[...data.workshops,...rows];
             } else if(uploadTab==="attendees"){
               const rawRows=sheet("attend");
@@ -2175,12 +2167,6 @@ function viewUpload(){
                 const k=Object.keys(r);
                 // DEBUG: log first row column names and values
                 if(rowNum===0){
-                  console.log("=== UPLOAD DEBUG ===");
-                  console.log("Column keys found:", k);
-                  console.log("First row values:", r);
-                  console.log("findCol email result:", findCol(k,"email","email / id","email/id","badge","employee id","id"));
-                  console.log("findCol name result:", findCol(k,"name","full name","learner name"));
-                  console.log("findCol workshopId result:", findCol(k,"workshop id","workshopid","workshop"));
                 }
                 const email=normLow(r[findCol(k,"email","email / id","email/id","badge","employee id","id")||""]||"");
                 const name=norm(r[findCol(k,"name","full name","learner name")||""]||"");
@@ -2361,7 +2347,6 @@ function viewAnalytics(){
   const regionRows=Object.values(regionMap).sort((a,b)=>b.t-a.t);
 
   const allQCols=new Set();allRows.forEach(r=>Object.keys(r.questions||{}).forEach(c=>allQCols.add(c)));
-  console.log("Question cols found:", [...allQCols], "allRows count:", allRows.length, "sample questions:", allRows[0]?.questions);
   const qStats=[...allQCols].sort().map(col=>{
     const rows=allRows.filter(r=>r.questions&&r.questions[col]!==undefined);
     const wrong=rows.filter(r=>{
