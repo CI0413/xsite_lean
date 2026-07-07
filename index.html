@@ -259,6 +259,8 @@ let dateFrom = "";
 let dateTo = "";
 let learnerSearch = "";
 let workshopSearch = "";
+let workshopSortDir = "desc"; // desc = newest first
+let execTierFilter = {trained:"All", certified:"All"};
 let activeTierTab = "Lean 1A";
 let activeAnalyticsTier = "All";
 let addWorkshopForm = {tier:"",date:"",region:"",country:"",site:"",customer:"",leadTrainer:"",coTrainer:""};
@@ -995,8 +997,9 @@ function viewExecutive(){
   const fd=getFilteredData();
   const totalW=fd.workshops.length;
   const totalL=fd.opsEmails.size;
-  const trained=new Set(fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)).map(x=>x.email)).size;
-  const trainedEmailTiersExec=new Set(fd.exams.filter(x=>x.passed).map(x=>x.email+"||"+x.tier));
+  const trainedFiltered=fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&(execTierFilter.trained==="All"||x.tier===execTierFilter.trained));
+  const trained=new Set(trainedFiltered.map(x=>x.email)).size;
+  const trainedEmailTiersExec=new Set(fd.exams.filter(x=>x.passed&&(execTierFilter.certified==="All"||x.tier===execTierFilter.certified)).map(x=>x.email+"||"+x.tier));
   const certified=new Set(fd.projects.filter(p=>isApproved(p)&&trainedEmailTiersExec.has(p.email+"||"+p.tier)).map(p=>p.email)).size;
   const approvedProjects=fd.projects.filter(isApproved);
   const totalSavings=approvedProjects.reduce((s,p)=>s+p.savings,0);
@@ -1039,14 +1042,26 @@ function viewExecutive(){
         <div class="kpi-value" style="color:#002664">${totalL}</div>
       </div>
       <div class="kpi-card" style="border-top-color:#E18635">
-        <div class="kpi-header"><div class="kpi-label">Total Trained</div><div class="kpi-icon">✅</div></div>
+        <div class="kpi-header"><div class="kpi-label">Total Trained</div>
+          <select onchange="execTierFilter.trained=this.value;render();" onclick="event.stopPropagation()"
+            style="font-size:10px;border:1px solid #d1d5db;border-radius:5px;padding:2px 4px;background:#fff;color:#002664;font-family:Arial,sans-serif;cursor:pointer">
+            <option value="All"${execTierFilter.trained==="All"?" selected":""}>All</option>
+            ${TIERS.map(t=>`<option value="${t}"${execTierFilter.trained===t?" selected":""}>${t.replace("Lean ","")}</option>`).join("")}
+          </select>
+        </div>
         <div class="kpi-value" style="color:#002664">${trained}</div>
-        <div class="kpi-sub">${pct(trained,totalL)}% of attendees · unique, any tier</div>
+        <div class="kpi-sub">${pct(trained,totalL)}% of attendees${execTierFilter.trained!=="All"?" · "+execTierFilter.trained:" · unique, any tier"}</div>
       </div>
-      <div class="kpi-card" style="border-top-color:#E18635">
-        <div class="kpi-header"><div class="kpi-label">Certified</div><div class="kpi-icon">🏅</div></div>
+      <div class="kpi-card" style="border-top-color:#00682A">
+        <div class="kpi-header"><div class="kpi-label">Certified</div>
+          <select onchange="execTierFilter.certified=this.value;render();" onclick="event.stopPropagation()"
+            style="font-size:10px;border:1px solid #d1d5db;border-radius:5px;padding:2px 4px;background:#fff;color:#00682A;font-family:Arial,sans-serif;cursor:pointer">
+            <option value="All"${execTierFilter.certified==="All"?" selected":""}>All</option>
+            ${TIERS.map(t=>`<option value="${t}"${execTierFilter.certified===t?" selected":""}>${t.replace("Lean ","")}</option>`).join("")}
+          </select>
+        </div>
         <div class="kpi-value" style="color:#00682A">${certified}</div>
-        <div class="kpi-sub">${pct(certified,totalL)}% of attendees</div>
+        <div class="kpi-sub">${pct(certified,totalL)}% of attendees${execTierFilter.certified!=="All"?" · "+execTierFilter.certified:""}</div>
       </div>
       <div class="kpi-card" style="border-top-color:#E18635">
         <div class="kpi-header"><div class="kpi-label">Projects Submitted</div><div class="kpi-icon">💡</div></div>
@@ -1121,7 +1136,7 @@ function viewExecutive(){
 
 function viewWorkshops(){
   const fd=getFilteredData();
-  const rows=fd.workshops.map(w=>({...w,count:fd.attendees.filter(a=>a.workshopId===w.id).length})).sort((a,b)=>b.date.localeCompare(a.date));
+  const rows=fd.workshops.map(w=>({...w,count:fd.attendees.filter(a=>a.workshopId===w.id).length})).sort((a,b)=>workshopSortDir==="desc"?b.date.localeCompare(a.date):a.date.localeCompare(b.date));
   const div=document.createElement("div");
   div.innerHTML=`<div class="page-title">Workshops <span style="font-size:14px;color:#9ca3af;font-weight:400">${rows.length} records</span></div>`;
   div.insertBefore(buildFilterBar(),null);
