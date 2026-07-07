@@ -783,9 +783,13 @@ function genId(){return"W"+(++wsCounter);}
 function parseExcelFile(wb){
   function sheet(name){
     const sn=wb.SheetNames.find(n=>normLow(n).includes(normLow(name)));
-    return sn?XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:""}):[]; 
+    if(!sn){console.warn("Sheet not found for:",name,"Available:",wb.SheetNames);return[];}
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:""});
+    console.log("Sheet '"+sn+"' -> "+rows.length+" rows, keys:", rows.length?Object.keys(rows[0]):[]);
+    return rows;
   }
   const wsRaw=sheet("workshop"), attRaw=sheet("attend"), examRaw=sheet("exam"), projRaw=sheet("project"), trRaw=sheet("trainer");
+  console.log("Raw counts - ws:",wsRaw.length,"att:",attRaw.length,"exam:",examRaw.length,"proj:",projRaw.length,"tr:",trRaw.length);
 
   const workshops=wsRaw.map(r=>{const k=Object.keys(r);const _ws=norm(r[findCol(k,"site")||""]||""),_wc=norm(r[findCol(k,"customer","client","account")||""]||"");return{id:norm(r[findCol(k,"id","workshop id")||""]),tier:norm(r[findCol(k,"tier")||""]),date:norm(r[findCol(k,"date")||""]),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),site:_ws,customer:extractCustomer(_ws,_wc),leadTrainer:norm(r[findCol(k,"lead trainer","lead")||""]),coTrainer:norm(r[findCol(k,"co-trainer","co trainer","cotrainer")||""])};}).filter(w=>w.tier||w.date);
   const attendees=attRaw.map(r=>{const k=Object.keys(r);const _wsId=norm(r[findCol(k,"workshop id","workshop")||""]||"");const _em=normLow(r[findCol(k,"email","email / id","email/id","badge","employee id","id")||""]||"");const _nm=norm(r[findCol(k,"name","full name")||""]||"");const _st=norm(r[findCol(k,"site","location")||""]||"");const _cu=norm(r[findCol(k,"customer","client","account")||""]||"");const _co=norm(r[findCol(k,"country")||""]||"");const _re=norm(r[findCol(k,"region")||""]||"");return{workshopId:_wsId,email:_em,name:_nm,site:_st,customer:extractCustomer(_st,_cu),country:_co,region:_re,learnerType:norm(r[findCol(k,"learner type","type")||""]||""),role:norm(r[findCol(k,"role","job title","position")||""]||""),department:norm(r[findCol(k,"department","dept")||""]||"")};}).map(a=>{
@@ -2084,6 +2088,15 @@ function viewUpload(){
 
               rawRows.forEach((r,rowNum)=>{
                 const k=Object.keys(r);
+                // DEBUG: log first row column names and values
+                if(rowNum===0){
+                  console.log("=== UPLOAD DEBUG ===");
+                  console.log("Column keys found:", k);
+                  console.log("First row values:", r);
+                  console.log("findCol email result:", findCol(k,"email","email / id","email/id","badge","employee id","id"));
+                  console.log("findCol name result:", findCol(k,"name","full name","learner name"));
+                  console.log("findCol workshopId result:", findCol(k,"workshop id","workshopid","workshop"));
+                }
                 const email=normLow(r[findCol(k,"email","email / id","email/id","badge","employee id","id")||""]||"");
                 const name=norm(r[findCol(k,"name","full name","learner name")||""]||"");
                 const wsId=norm(r[findCol(k,"workshop id","workshopid","workshop")||""]||"");
