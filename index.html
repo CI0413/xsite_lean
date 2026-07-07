@@ -1628,6 +1628,8 @@ function viewByTier(){
   });
   const statusOrder={"Certified":0,"Trained":1,"Attended Not Passed":2,"No Exam Yet":3};
   learners.sort((a,b)=>statusOrder[a.status]-statusOrder[b.status]||a.name.localeCompare(b.name));
+  if(!window._tierLearners)window._tierLearners={};
+  window._tierLearners[tier]=learners;
 
   const lp=document.createElement("div");lp.className="panel";
   lp.innerHTML=`<div class="panel-title">${tier} Learners (${learners.length})</div><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Site</th><th>Customer</th><th>Region</th><th class="center">Score</th><th>Status</th></tr></thead><tbody>${
@@ -2544,6 +2546,22 @@ function exportToExcel(filename, sheets){
   XLSX.writeFile(wb,filename);
 }
 
+function exportTierLearners(tier, learners){
+  if(!learners||!learners.length){alert("No learner data to export.");return;}
+  const rows=learners.map(l=>({
+    "Name":l.name||"",
+    "Email / ID":l.email&&l.email.endsWith("@internal")?"(auto)":l.email||"",
+    "Site":l.site||"",
+    "Customer":l.customer||"",
+    "Region":l.region||"",
+    "Country":l.country||"",
+    "Exam Score":l.score!==null?l.score:"",
+    "Status":l.status||"",
+    "Needs Action":["No Exam Yet","Attended Not Passed"].includes(l.status)?"Yes":"",
+  }));
+  exportToExcel("DSV_"+tier.replace(" ","_")+"_Learners_"+new Date().toISOString().slice(0,10)+".xlsx",[{name:tier+" Learners",data:rows}]);
+}
+
 function exportLearners(learners){
   const d2=data||SAMPLE;
   const rows=learners.map(l=>({
@@ -2648,67 +2666,80 @@ function viewSites(){
   const d2=data||SAMPLE;
   const fd=getFilteredData();
 
-  // All known sites from attendees and workshops
-  const allSites=new Set([
+  // All known sites from attendees (learner home sites)
+  const allSites=new Set(fd.attendees.map(a=>a.site).filter(Boolean));
+
+  // Build per-site data from learner home sites
+  const siteData={};
+  fd.attendees.forEach(a=>{
+    if(!a.site)return;
+    if(!siteData[a.site])siteData[a.site]={
+      site:a.site,customer:extractCustomer(a.site,a.customer||""),
+      region:a.region||"",country:a.country||"",
+      learners:new Set(),tiers:new Set(),latestDate:"",
+    };
+    siteData[a.site].learners.add(a.email);
+    // Get tiers trained for this learner
+    fd.exams.filter(x=>x.email===a.email&&x.passed).forEach(x=>{
+      siteData[a.site].tiers.add(x.tier);
+    });
+    // Latest workshop date for learners from this site
+    const ws=fd.workshops.find(w=>w.id===a.workshopId);
+    if(ws&&ws.date&&(!siteData[a.site].latestDate||ws.date>siteData[a.site].latestDate)){
+      siteData[a.site].latestDate=ws.date;
+    }
+  });
+
+  const activeSites=Object.values(siteData)
+    .map(s=>({...s,learners:s.learners.size,tiers:[...s.tiers]}))
+    .sort((a,b)=>b.learners-a.learners);
+
+  // Sites with no learners in filtered data
+  const allKnownSites=new Set([
     ...(d2.attendees||[]).map(a=>a.site).filter(Boolean),
     ...(d2.workshops||[]).map(w=>w.site).filter(Boolean),
   ]);
-
-  // Sites with activity (in filtered data)
-  const activeSiteData={};
-  fd.workshops.forEach(w=>{
-    if(!w.site)return;
-    if(!activeSiteData[w.site])activeSiteData[w.site]={site:w.site,customer:w.customer||"",region:w.region||"",workshops:0,learners:new Set(),latestDate:"",tiers:new Set()};
-    activeSiteData[w.site].workshops++;
-    activeSiteData[w.site].tiers.add(w.tier);
-    if(!activeSiteData[w.site].latestDate||w.date>activeSiteData[w.site].latestDate)activeSiteData[w.site].latestDate=w.date;
-  });
-  fd.attendees.forEach(a=>{
-    if(a.site&&activeSiteData[a.site])activeSiteData[a.site].learners.add(a.email);
-  });
-
-  const activeSites=Object.values(activeSiteData).map(s=>({...s,learners:s.learners.size,tiers:[...s.tiers]})).sort((a,b)=>b.workshops-a.workshops);
-  const inactiveSites=[...allSites].filter(s=>!activeSiteData[s]).sort();
+  const inactiveSites=[...allKnownSites].filter(s=>!siteData[s]).sort();
 
   const d=document.createElement("div");
-  d.innerHTML=`<div class="page-title" style="margin-bottom:16px">Site Coverage</div>`;
+  d.innerHTML=`<div class="page-title" style="margin-bottom:16px">Site Coverage</div>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:16px">Tracking learner home sites — where trained employees are based.</div>`;
   d.appendChild(buildFilterBar());
   d.appendChild(buildDateRange());
 
-  // Summary KPIs
-  const kpis=document.createElement("div");
-  kpis.className="kpi-grid";kpis.style.marginBottom="20px";
+  // KPI cards
+  const kpis=document.createElement("div");kpis.className="kpi-grid";kpis.style.marginBottom="20px";
   kpis.innerHTML=`
-    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Active Sites</div><div class="kpi-icon">✅</div></div><div class="kpi-value" style="color:#002664">${activeSites.length}</div></div>
-    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">No Training Yet</div><div class="kpi-icon">⚠️</div></div><div class="kpi-value" style="color:#b91c1c">${inactiveSites.length}</div><div class="kpi-sub">${allSites.size} total sites known</div></div>
-    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Coverage</div><div class="kpi-icon">📊</div></div><div class="kpi-value" style="color:#002664">${allSites.size?Math.round((activeSites.length/allSites.size)*100):0}%</div></div>
+    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Sites Reached</div><div class="kpi-icon">✅</div></div><div class="kpi-value" style="color:#002664">${activeSites.length}</div><div class="kpi-sub">sites with trained learners</div></div>
+    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">No Training Yet</div><div class="kpi-icon">⚠️</div></div><div class="kpi-value" style="color:#b91c1c">${inactiveSites.length}</div><div class="kpi-sub">${allKnownSites.size} total sites known</div></div>
+    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Coverage</div><div class="kpi-icon">📊</div></div><div class="kpi-value" style="color:#002664">${allKnownSites.size?Math.round((activeSites.length/allKnownSites.size)*100):0}%</div></div>
   `;
   d.appendChild(kpis);
 
   // Active sites table
   const activePanel=document.createElement("div");activePanel.className="panel";
-  activePanel.innerHTML=`<div class="panel-title">Active Sites (${activeSites.length})</div>
+  activePanel.innerHTML=`<div class="panel-title">Sites With Trained Learners (${activeSites.length})</div>
     <table class="tbl"><thead><tr>
-      <th>Site</th><th>Customer</th><th>Region</th><th class="center">Workshops</th><th class="center">Learners</th><th>Tiers Delivered</th><th>Last Workshop</th>
+      <th>Site</th><th>Customer</th><th>Region</th><th>Country</th>
+      <th class="center">Learners Trained</th><th>Tiers Completed</th><th>Last Training</th>
     </tr></thead><tbody>${
     activeSites.map((s,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
       <td style="font-weight:600">${s.site}</td>
       <td>${s.customer||"—"}</td>
       <td>${s.region||"—"}</td>
-      <td class="center" style="font-weight:600;color:#002664">${s.workshops}</td>
-      <td class="center" style="font-weight:600;color:#002664">${s.learners}</td>
-      <td>${s.tiers.map(t=>`<span class="badge" style="background:${TIER_BG[t]};color:${TIER_COLOR[t]};margin-right:3px">${t}</span>`).join("")}</td>
+      <td>${s.country||"—"}</td>
+      <td class="center" style="font-weight:700;color:#002664">${s.learners}</td>
+      <td>${s.tiers.map(t=>`<span class="badge" style="background:${TIER_BG[t]};color:${TIER_COLOR[t]};margin-right:3px">${t}</span>`).join("")||"<span style='color:#9ca3af;font-size:11px'>Attended only</span>"}</td>
       <td style="color:#6b7280;font-size:12px">${s.latestDate||"—"}</td>
     </tr>`).join("")
   }</tbody></table>`;
   d.appendChild(activePanel);
 
-  // Inactive sites
   if(inactiveSites.length){
     const inactPanel=document.createElement("div");inactPanel.className="panel";
     inactPanel.innerHTML=`<div class="panel-title" style="color:#b91c1c">Sites With No Training Activity (${inactiveSites.length})</div>
-      <div style="font-size:12px;color:#6b7280;margin-bottom:12px">These sites appear in your attendee or workshop data but have no workshops in the current filter.</div>
-      ${inactiveSites.map(s=>`<div class="inactive-site"><span style="font-weight:500">${s}</span><span style="font-size:11px;color:#9ca3af">No workshops recorded</span></div>`).join("")}`;
+      <div style="font-size:12px;color:#6b7280;margin-bottom:12px">These sites appear in your data but have no trained learners under the current filters.</div>
+      ${inactiveSites.map(s=>`<div class="inactive-site"><span style="font-weight:500">${s}</span><span style="font-size:11px;color:#9ca3af">No trained learners</span></div>`).join("")}`;
     d.appendChild(inactPanel);
   }
   return d;
