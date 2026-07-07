@@ -2062,7 +2062,7 @@ function viewUpload(){
       <label style="font-size:11px;color:#6b7280;font-weight:600;display:block;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.3px">What are you uploading?</label>
       <div class="radio-group">${tabOpts.map(o=>`<label><input type="radio" name="up-tab" value="${o.id}"${uploadTab===o.id?" checked":""}> ${o.label}</label>`).join("")}</div>
     </div>
-    <div id="mode-section" style="${uploadTab==="full"?"display:none":""}">
+    <div id="mode-section">
       <label style="font-size:11px;color:#6b7280;font-weight:600;display:block;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.3px">Upload mode</label>
       <div class="radio-group">
         <label><input type="radio" name="up-mode" value="replace"${uploadMode==="replace"?" checked":""}> Replace — wipe existing data for this tab</label>
@@ -2080,7 +2080,7 @@ function viewUpload(){
   d.appendChild(panel);
 
   setTimeout(()=>{
-    document.querySelectorAll('input[name="up-tab"]').forEach(r=>{r.onchange=e=>{uploadTab=e.target.value;document.getElementById("mode-section").style.display=uploadTab==="full"?"none":"";};});
+    document.querySelectorAll('input[name="up-tab"]').forEach(r=>{r.onchange=e=>{uploadTab=e.target.value;};});
     document.querySelectorAll('input[name="up-mode"]').forEach(r=>{r.onchange=e=>{uploadMode=e.target.value;};});
     const zone=document.getElementById("upload-zone");
     const fi=document.getElementById("file-input");
