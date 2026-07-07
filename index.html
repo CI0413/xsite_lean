@@ -790,11 +790,20 @@ function parseExcelFile(wb){
     // If first row looks like a title (has no recognisable column keys — all __EMPTY or tab name)
     if(rows.length){
       const firstKeys=Object.keys(rows[0]);
-      const looksLikeTitle=firstKeys.every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_")||normLow(k)===normLow(name)||k===sn);
+      // Detect title row: first key contains the sheet name, is a long title string,
+      // or all remaining keys are __EMPTY
+      const firstKeyLow=normLow(firstKeys[0]||"");
+      const looksLikeTitle=
+        firstKeys.slice(1).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_")) && (
+          firstKeyLow===normLow(name) ||
+          firstKeyLow===normLow(sn) ||
+          firstKeys[0].includes("—") ||
+          firstKeys[0].includes("DSV") ||
+          firstKeys[0].length>30
+        );
       if(looksLikeTitle){
-        // Skip first row and use second row as header
         rows=XLSX.utils.sheet_to_json(ws,{defval:"",range:1});
-        console.log("Skipped title row for sheet '"+sn+"'");
+        console.log("Skipped title row for sheet '"+sn+"', new keys:", rows.length?Object.keys(rows[0]):[]);
       }
     }
     // Strip any legend/note rows at the bottom (rows where all values are blank or contain "required" text)
