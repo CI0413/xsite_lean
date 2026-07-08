@@ -835,6 +835,23 @@ function showSave(msg,color){
   setTimeout(()=>{t.textContent="";},3000);
 }
 
+// ── Date conversion (global) ─────────────────────────────────────
+function xlSerialToDate(val){
+  if(!val)return"";
+  const s=val.toString().trim();
+  if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);
+  if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(s)){
+    const d=new Date(s);
+    if(!isNaN(d))return d.toISOString().slice(0,10);
+  }
+  const n=parseFloat(s);
+  if(!isNaN(n)&&n>10000&&n<100000){
+    const d=new Date(Math.round((n-25569)*86400*1000));
+    return d.toISOString().slice(0,10);
+  }
+  return s;
+}
+
 // ── Parse Excel ───────────────────────────────────────────────────
 let wsCounter=1000;
 function genId(){return"W"+(++wsCounter);}
@@ -892,113 +909,65 @@ function parseExcelFile(wb){
   }).filter(a=>a.name);
 
   // Parse exams - best score per email+tier
-  // Helper: convert Excel serial date to YYYY-MM-DD string
-  function xlSerialToDate(val){
-    if(!val)return"";
-    const s=val.toString().trim();
-    // Already a date string?
-    if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);
-    if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(s)){
-      const d=new Date(s);
-      if(!isNaN(d))return d.toISOString().slice(0,10);
-    }
-    // Excel serial number (days since 1899-12-30)
-    const n=parseFloat(s);
-    if(!isNaN(n)&&n>10000&&n<100000){
-      const d=new Date(Math.round((n-25569)*86400*1000));
-      return d.toISOString().slice(0,10);
-    }
-    return s;
-  }
-
   const firstMap={},bestMap={};
   const allRows=examRaw.map(r=>{
     const k=Object.keys(r);
-
-    // Email: prefer Email1 when Email column = "anonymous" (MS Forms pattern)
     let email=normLow(r[findCol(k,"email")||""]||"");
     if(!email||email==="anonymous"){
-      // Try Email1, Email2, or any col with @ in value
-      const altEmailCol=k.find(col=>{
-        const lc=col.toLowerCase().trim();
-        if(lc==="email1"||lc==="email 1"||lc==="learner email")return true;
-        return false;
-      });
+      const altEmailCol=k.find(col=>{const lc=col.toLowerCase().trim();return lc==="email1"||lc==="email 1"||lc==="learner email";});
       if(altEmailCol)email=normLow(r[altEmailCol]||"");
-      // Last resort: scan all values for an email
-      if(!email||email==="anonymous"){
-        for(const col of k){
-          const v=(r[col]||"").toString().trim();
-          if(v.includes("@")&&v.includes(".")&&!v.includes(" ")){email=v.toLowerCase();break;}
-        }
-      }
+      if(!email||email==="anonymous"){for(const col of k){const v=(r[col]||"").toString().trim();if(v.includes("@")&&v.includes(".")&&!v.includes(" ")){email=v.toLowerCase();break;}}}
     }
-
-    // Name: prefer Name1 (MS Forms puts real name there)
     let learnerName=norm(r[findCol(k,"name")||""]||"");
     const name1Col=k.find(col=>col.toLowerCase().trim()==="name1"||col.toLowerCase().trim()==="name 1");
     if(name1Col)learnerName=norm(r[name1Col]||"")||learnerName;
-
     const tier=norm(r[findCol(k,"tier")||""]||"");
     const score=parseFloat((r[findCol(k,"score","total points","total score")||""]||"").toString().replace(/[,$]/g,""))||0;
-
-    // Date: handle Excel serial numbers and MS Forms date formats
     const rawDate=r[findCol(k,"date","exam date","completion time","completion date","start time")||""]||"";
     const date=xlSerialToDate(rawDate);
-
-    // Site from MS Forms "Site Name" column
     const site=norm(r[findCol(k,"site name","site","location")||""]||"");
-    const customer=extractCustomer(site,"");
     const country=norm(r[findCol(k,"country")||""]||"");
     const trainer=norm(r[findCol(k,"trainer","lead trainer")||""]||"");
-
-    // Questions: handle both Q1/Q2 pattern AND "Points - Question text" pattern (MS Forms)
-    // For MS Forms: columns starting with "Points - " are 1=correct, 0=incorrect
+    const customer=extractCustomer(site,"");
     const questions={};
     let qNum=1;
-    const qTextMap={}; // Q1 -> "actual question text"
+    const qTextMap={};
     k.forEach(col=>{
       const trimmed=col.trim();
-      // Standard Q1, Q2... pattern (from template with Q1, Q2 headers)
       if(/^q\d+$/i.test(normCol(trimmed))||/^question\s*\d+/i.test(normCol(trimmed))){
         questions[normCol(trimmed).toUpperCase()]=norm(r[col]);
-      }
-      // MS Forms "Points - [question text]" pattern: 1=correct, 0=incorrect
-      else if(/^points\s*-\s*/i.test(trimmed)){
+      } else if(/^points\s*-\s*/i.test(trimmed)){
         const qLabel=trimmed.replace(/^points\s*-\s*/i,"").trim();
         const skip=["name","name1","email","email1","country","site name","date","trainer","training mode","total"];
         if(!skip.some(s=>qLabel.toLowerCase()===s)&&qLabel.length>2){
           const qKey="Q"+qNum;
-          questions[qKey]=r[col]; // store raw 1/0
-          qTextMap[qKey]=qLabel;  // store full question text
+          questions[qKey]=r[col];
+          qTextMap[qKey]=qLabel;
           qNum++;
         }
       }
     });
-
     const key=email+"|"+tier;
     if(!firstMap[key]||date<firstMap[key].date)firstMap[key]={score,date,passed:score>=16};
-    if(!bestMap[key]||score>bestMap[key].score)bestMap[key]={email,tier,score,passed:score>=16,date,questions,learnerName,site,country,trainer};
+    if(!bestMap[key]||score>bestMap[key].score)bestMap[key]={email,tier,score,passed:score>=16,date,questions,qTextMap,learnerName,site,country,trainer};
     return{email,tier,score,date,passed:score>=16,questions,qTextMap,learnerName,site,country,trainer};
   });
+
   const exams=Object.values(bestMap);
   const fa=Object.values(firstMap);
   const firstPassRate=fa.length?Math.round((fa.filter(x=>x.passed).length/fa.length)*100):0;
   const avgScore=exams.length?+(exams.reduce((s,x)=>s+x.score,0)/exams.length).toFixed(1):0;
 
-  // Build question label map from all rows — {tier: {Q1: "text",...}}
   const questionLabels={};
   allRows.forEach(row=>{
     if(!row.qTextMap||!Object.keys(row.qTextMap).length)return;
     const t=row.tier||"All";
     if(!questionLabels[t])questionLabels[t]={};
-    Object.entries(row.qTextMap).forEach(([k,v])=>{
-      if(v&&!questionLabels[t][k])questionLabels[t][k]=v;
-    });
+    Object.entries(row.qTextMap).forEach(([k,v])=>{if(v&&!questionLabels[t][k])questionLabels[t][k]=v;});
   });
 
+  const projects=projRaw.map(r=>{const k=Object.keys(r);return{email:normLow(r[findCol(k,"email","email / id","email/id")||""]||""),tier:norm(r[findCol(k,"tier")||""]),submitted:xlSerialToDate(r[findCol(k,"date submitted","submitted","date submitted *")||""]),approved:norm(r[findCol(k,"approved")||""]),savings:parseFloat((r[findCol(k,"savings ($)","savings","cost savings","saving")||""]||"").toString().replace(/[$,()]/g,""))||0};}).filter(p=>p.email);
 
-  const projects=projRaw.map(r=>{const k=Object.keys(r);return{email:normLow(r[findCol(k,"email")||""]),tier:norm(r[findCol(k,"tier")||""]),submitted:xlSerialToDate(r[findCol(k,"date submitted","submitted","date submitted *")||""]),approved:norm(r[findCol(k,"approved")||""]),savings:parseFloat((r[findCol(k,"savings ($)","savings","cost savings")||""]||"").toString().replace(/[$,()]/g,""))||0};}).filter(p=>p.email);
   const trainers=trRaw.map(r=>{const k=Object.keys(r);const yn=key=>{const v=norm(r[findCol(k,key)||""]).toLowerCase();return v==="yes"||v==="true";};return{name:norm(r[findCol(k,"name","trainer name","full name")||""]),email:normLow(r[findCol(k,"email","email / id","email/id")||""]||""),site:norm(r[findCol(k,"site","location")||""]||""),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),customer:norm(r[findCol(k,"customer")||""]),q1a:yn("qualified 1a"),q1b:yn("qualified 1b"),q1c:yn("qualified 1c"),date1a:xlSerialToDate(r[findCol(k,"date certified 1a","date 1a")||""]),date1b:xlSerialToDate(r[findCol(k,"date certified 1b","date 1b")||""]),date1c:xlSerialToDate(r[findCol(k,"date certified 1c","date 1c")||""]),lead1a:norm(r[findCol(k,"lead trainer 1a","lead 1a")||""]||""),lead1b:norm(r[findCol(k,"lead trainer 1b","lead 1b")||""]||""),lead1c:norm(r[findCol(k,"lead trainer 1c","lead 1c")||""]||"")};}).filter(t=>t.name);
 
   return{workshops,attendees,exams,allExamRows:allRows,firstPassRate,avgScore,projects,trainers,questionLabels};
