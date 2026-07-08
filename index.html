@@ -260,7 +260,8 @@ let dateTo = "";
 let learnerSearch = "";
 let workshopSearch = "";
 let workshopSortDir = "desc"; // desc = newest first
-let execTierFilter = {trained:"All", certified:"All"};
+let execTierFilter = {trained:"All", certified:"All", trainerCert:"All"};
+let trainerKpiTier = {total:"All", inProgress:"All", certified:"All"};
 let tierStatusFilter = "All";
 let activeTierTab = "Lean 1A";
 let activeAnalyticsTier = "All";
@@ -278,6 +279,16 @@ function pct(a,b){return b?Math.round((a/b)*100):0;}
 const isApproved = p => {const v=norm(p.approved).toLowerCase();return v==="yes"||v==="true"||v==="1";};
 // Returns true if learner should count in ops KPIs
 // Non-ops: type field contains "non-ops", "non ops", "management", "support", "admin", "salary" etc
+function trainerStatus(trainer, tier){
+  // Returns "Certified", "In Progress", or "Not Qualified"
+  const t=tier.toLowerCase().replace("lean ","").replace(" ","");
+  const qualified=trainer["q"+t];
+  const dateCert=trainer["date"+t];
+  if(!qualified)return"Not Qualified";
+  if(dateCert)return"Certified";
+  return"In Progress";
+}
+
 function isManualCertified(email, tier){
   const d2=data||SAMPLE;
   return !!(d2.certOverrides&&d2.certOverrides[email+"||"+tier]);
@@ -1144,8 +1155,9 @@ function viewWorkshops(){
   div.appendChild(buildFilterBar());
   const tbl=document.createElement("div");
   tbl.className="panel";
-  tbl.innerHTML=`<table class="tbl"><thead><tr><th>Tier</th><th onclick="workshopSortDir=workshopSortDir==='desc'?'asc':'desc';render();" style="cursor:pointer;user-select:none;white-space:nowrap">${workshopSortDir==='desc'?'Date ▼':'Date ▲'}</th><th>Region</th><th>Country</th><th>Site</th><th>Customer</th><th>Lead Trainer</th><th>Co-Trainer</th><th class="center">Attendees</th></tr></thead><tbody>${
+  tbl.innerHTML=`<table class="tbl"><thead><tr><th>Workshop ID</th><th>Tier</th><th onclick="workshopSortDir=workshopSortDir==='desc'?'asc':'desc';render();" style="cursor:pointer;user-select:none;white-space:nowrap">${workshopSortDir==='desc'?'Date ▼':'Date ▲'}</th><th>Region</th><th>Country</th><th>Site</th><th>Customer</th><th>Lead Trainer</th><th>Co-Trainer</th><th class="center">Attendees</th></tr></thead><tbody>${
     rows.map((w,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
+      <td style="font-size:11px;color:#9ca3af">${w.id||"—"}</td>
       <td><span class="badge" style="background:${TIER_BG[w.tier]||"#F0F3F8"};color:${TIER_COLOR[w.tier]||NAVY}">${w.tier}</span>${w._autoCreated?'<span style="font-size:10px;color:#9ca3af;margin-left:4px">auto</span>':''}</td>
       <td style="color:#6b7280">${w.date}</td>
       <td>${w.region}</td><td>${w.country}</td><td>${w.site}</td><td>${w.customer}</td>
@@ -1282,6 +1294,50 @@ function viewTrainers(){
     if(isQual)  return `<span class="badge" style="background:#dbeafe;color:#1e40af">✓</span>`;
     return `<span style="color:#d1d5db">—</span>`;
   }
+
+    const d=document.createElement("div");
+  d.innerHTML=`<div class="page-title" style="margin-bottom:16px">Trainers</div>`;
+  d.appendChild(buildFilterBar());
+
+  // Build trainer KPI data
+  function trainerCountForTier(tier, status){
+    return fd.trainers.filter(t=>{
+      if(tier!=="All"&&trainerStatus(t,tier)===status)return true;
+      if(tier==="All")return TIERS.some(ti=>trainerStatus(t,ti)===status);
+      return false;
+    }).length;
+  }
+  function uniqueTrainerCount(tier){
+    if(tier==="All")return fd.trainers.length;
+    return fd.trainers.filter(t=>trainerStatus(t,tier)!=="Not Qualified").length;
+  }
+
+  // Tier select helper for KPI cards
+  const tierSelect=(id,val)=>`<select onchange="trainerKpiTier['${id}']=this.value;render();" onclick="event.stopPropagation()"
+    style="font-size:10px;border:1px solid #d1d5db;border-radius:5px;padding:2px 4px;background:#fff;color:#002664;font-family:Arial,sans-serif;cursor:pointer">
+    <option value="All"${val==="All"?" selected":""}>All</option>
+    ${TIERS.map(t=>`<option value="${t}"${val===t?" selected":""}>${t.replace("Lean ","")}</option>`).join("")}
+  </select>`;
+
+  const kpis=document.createElement("div");kpis.className="kpi-grid";kpis.style.marginBottom="20px";
+  kpis.innerHTML=`
+    <div class="kpi-card" style="border-top-color:#E18635">
+      <div class="kpi-header"><div class="kpi-label">Total Trainers</div>${tierSelect('total',trainerKpiTier.total)}</div>
+      <div class="kpi-value" style="color:#002664">${uniqueTrainerCount(trainerKpiTier.total)}</div>
+      <div class="kpi-sub">${trainerKpiTier.total==="All"?"across all tiers":trainerKpiTier.total+" qualified"}</div>
+    </div>
+    <div class="kpi-card" style="border-top-color:#E18735">
+      <div class="kpi-header"><div class="kpi-label">In Progress</div>${tierSelect('inProgress',trainerKpiTier.inProgress)}</div>
+      <div class="kpi-value" style="color:#E18735">${trainerCountForTier(trainerKpiTier.inProgress,"In Progress")}</div>
+      <div class="kpi-sub">qualified, pending certification</div>
+    </div>
+    <div class="kpi-card" style="border-top-color:#00682A">
+      <div class="kpi-header"><div class="kpi-label">Certified Trainers</div>${tierSelect('certified',trainerKpiTier.certified)}</div>
+      <div class="kpi-value" style="color:#00682A">${trainerCountForTier(trainerKpiTier.certified,"Certified")}</div>
+      <div class="kpi-sub">fully certified</div>
+    </div>
+  `;
+  d.appendChild(kpis);
 
   const d=document.createElement("div");
   d.innerHTML=`<div class="page-title" style="margin-bottom:16px">Trainers <span style="font-size:14px;color:#9ca3af;font-weight:400">${rows.length} records</span></div>`;
@@ -1505,6 +1561,17 @@ function viewProjects(){
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Projects Submitted</div><div class="kpi-icon">💡</div></div><div class="kpi-value" style="color:#002664">${fd.projects.length}</div></div>
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Projects Approved</div><div class="kpi-icon">✅</div></div><div class="kpi-value" style="color:#002664">${approved.length}</div><div class="kpi-sub">${pct(approved.length,fd.projects.length)}% approval rate</div></div>
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Total Savings</div><div class="kpi-icon">💰</div></div><div class="kpi-value" style="color:#00682A">${fmtSavings(totalSavings)}</div></div>
+      <div class="kpi-card" style="border-top-color:#00682A">
+        <div class="kpi-header"><div class="kpi-label">Certified Trainers</div>
+          <select onchange="execTierFilter.trainerCert=this.value;render();" onclick="event.stopPropagation()"
+            style="font-size:10px;border:1px solid #d1d5db;border-radius:5px;padding:2px 4px;background:#fff;color:#00682A;font-family:Arial,sans-serif;cursor:pointer">
+            <option value="All"${execTierFilter.trainerCert==="All"?" selected":""}>All</option>
+            ${TIERS.map(t=>`<option value="${t}"${execTierFilter.trainerCert===t?" selected":""}>${t.replace("Lean ","")}</option>`).join("")}
+          </select>
+        </div>
+        <div class="kpi-value" style="color:#00682A">${fd.trainers.filter(t=>execTierFilter.trainerCert==="All"?TIERS.some(ti=>trainerStatus(t,ti)==="Certified"):trainerStatus(t,execTierFilter.trainerCert)==="Certified").length}</div>
+        <div class="kpi-sub">${execTierFilter.trainerCert==="All"?"across all tiers":execTierFilter.trainerCert}</div>
+      </div>
   `;
   d.appendChild(kpis);
 
