@@ -1223,16 +1223,15 @@ function viewLearners(){
   const panel=document.createElement("div");panel.className="panel";
   panel.innerHTML=`<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>
     <th>Name</th><th>Email / ID</th><th>Site</th><th>Customer</th><th>Region</th><th>Country</th>
-    <th class="center">Workshops</th><th>Trainer(s)</th><th>Trained</th><th class="center">Project</th><th>Certified</th>
+    <th>Trainer(s)</th><th>Trained</th><th class="center">Project</th><th>Certified</th>
   </tr></thead><tbody>${
-    learners.map((l,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
+    filteredLearners.map((l,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
       <td style="font-weight:600;white-space:nowrap;cursor:pointer;color:#002664;text-decoration:underline;text-underline-offset:2px" onclick="showLearnerProfile('${l.email}')">${l.name}${!isOps(l.learnerType)?'<span style="margin-left:6px;background:#f3f4f6;color:#6b7280;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;vertical-align:middle">Non-Ops</span>':''}</td>
       <td style="font-size:13px;color:#6b7280">${displayEmail(l.email)}</td>
       <td style="font-size:12px">${l.site||"—"}</td>
       <td style="font-size:12px">${l.customer||"—"}</td>
       <td style="font-size:12px">${l.region||"—"}</td>
       <td style="font-size:12px">${l.country||"—"}</td>
-      <td class="center">${l.wCount}</td>
       <td style="white-space:nowrap">${
         l.trainers.length
           ? l.trainers.map(t=>`<span style="display:inline-flex;align-items:center;gap:4px;background:#f0f3f8;border-radius:5px;padding:2px 7px;font-weight:500;color:#002664;margin-right:3px;margin-bottom:2px">🎓 ${t}</span>`).join("")
@@ -2735,6 +2734,12 @@ function viewSites(){
 
   // Build per-site data from learner home sites
   const siteData={};
+  const _certET=new Set(fd.exams.filter(x=>x.passed).map(x=>x.email+"||"+x.tier));
+  const _certEmails=new Set(fd.projects.filter(p=>isApproved(p)&&_certET.has(p.email+"||"+p.tier)).map(p=>p.email));
+  // Also include manual cert overrides
+  const _d2c=data||SAMPLE;
+  Object.keys(_d2c.certOverrides||{}).forEach(k=>{const[em]=k.split("||");_certEmails.add(em);});
+
   fd.attendees.forEach(a=>{
     if(!a.site)return;
     if(!siteData[a.site])siteData[a.site]={
@@ -2743,6 +2748,7 @@ function viewSites(){
       learners:new Set(),certified:new Set(),tiers:new Set(),latestDate:"",
     };
     siteData[a.site].learners.add(a.email);
+    if(_certEmails.has(a.email))siteData[a.site].certified.add(a.email);
     // Get tiers trained for this learner
     fd.exams.filter(x=>x.email===a.email&&x.passed).forEach(x=>{
       siteData[a.site].tiers.add(x.tier);
