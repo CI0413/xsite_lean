@@ -1955,7 +1955,7 @@ function viewAddLearners(){
       saveData(data);
       showSave("✓ Saved","#86efac");
 
-      msg.innerHTML=`<div class="alert-success">✓ ${rows.length} learner${rows.length!==1?"s":""} added${tier&&date?` to a ${tier} session on ${date}`:" (no workshop linked)"}.`;</div>`;
+      msg.innerHTML='<div class="alert-success">&#10003; '+rows.length+' learner'+(rows.length!==1?"s":"")+' added'+(tier&&date?" to a "+tier+" session on "+date:" (no workshop linked)")+'.</div>';
 
       // Reset session fields but keep tier/date/site/trainer for easy repeat entry
       rowsEl.innerHTML="";
