@@ -998,6 +998,8 @@ function viewExecutive(){
     const sav=fd.projects.filter(p=>p.tier===tier&&isApproved(p)).reduce((s,p)=>s+p.savings,0);
     const c=TIER_COLOR[tier]||NAVY;
     const tp=pct(tr,att);
+    const _tET=new Set(fd.exams.filter(x=>x.tier===tier&&x.passed&&fd.opsEmails.has(x.email)).map(x=>x.email));
+    const cert=new Set(fd.projects.filter(p=>p.tier===tier&&isApproved(p)&&_tET.has(p.email)).map(p=>p.email)).size;
     return `<tr>
       <td><span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot" style="background:${c}"></span><span style="color:${c};font-weight:700">${tier}</span></span></td>
       <td class="center" style="font-weight:600">${att}</td>
@@ -1067,7 +1069,7 @@ function viewExecutive(){
       <table class="tbl">
         <thead><tr>
           <th>Tier</th><th class="center">Attendees</th><th class="center">Trained</th>
-          <th>Trained %</th><th class="center">Projects</th><th class="center">Savings</th>
+          <th>Trained %</th><th class="center">Certified</th><th class="center">Projects</th><th class="center">Savings</th>
         </tr></thead>
         <tbody>${tierRows}</tbody>
       </table>
@@ -1221,7 +1223,7 @@ function viewLearners(){
   const panel=document.createElement("div");panel.className="panel";
   panel.innerHTML=`<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>
     <th>Name</th><th>Email / ID</th><th>Site</th><th>Customer</th><th>Region</th><th>Country</th>
-    <th class="center">Workshops</th><th>Trainer(s)</th><th>Trained</th><th>Trained</th><th class="center">Project</th><th>Certified</th>
+    <th class="center">Workshops</th><th>Trainer(s)</th><th>Trained</th><th class="center">Project</th><th>Certified</th>
   </tr></thead><tbody>${
     learners.map((l,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
       <td style="font-weight:600;white-space:nowrap;cursor:pointer;color:#002664;text-decoration:underline;text-underline-offset:2px" onclick="showLearnerProfile('${l.email}')">${l.name}${!isOps(l.learnerType)?'<span style="margin-left:6px;background:#f3f4f6;color:#6b7280;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;vertical-align:middle">Non-Ops</span>':''}</td>
@@ -1237,7 +1239,6 @@ function viewLearners(){
           : "<span style='color:#9ca3af;font-size:11px'>—</span>"
       }</td>
       <td>${l.tiersTrained.map(t=>`<span class="badge" style="background:${TIER_BG[t]};color:${TIER_COLOR[t]};margin-right:3px">${t}</span>`).join("")||"<span style='color:#9ca3af;font-size:11px'>—</span>"}</td>
-      <td style="white-space:nowrap">${TIERS.filter(t=>l.bestScores[t]!==undefined).map(t=>t.replace("Lean ","")+":"+l.bestScores[t]).join(" · ")||"—"}</td>
       <td style="text-align:center">${(()=>{
         const pills=TIERS.filter(t=>l.projectsByTier[t]&&l.projectsByTier[t].submitted).map(t=>{
           const p=l.projectsByTier[t];
@@ -2739,7 +2740,7 @@ function viewSites(){
     if(!siteData[a.site])siteData[a.site]={
       site:a.site,customer:extractCustomer(a.site,a.customer||""),
       region:a.region||"",country:a.country||"",
-      learners:new Set(),tiers:new Set(),latestDate:"",
+      learners:new Set(),certified:new Set(),tiers:new Set(),latestDate:"",
     };
     siteData[a.site].learners.add(a.email);
     // Get tiers trained for this learner
