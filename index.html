@@ -600,20 +600,20 @@ function getFilteredData(){
   const wf=d2.workshops.filter(w=>
     (f.region==="All"||w.region===f.region)&&
     (f.country==="All"||w.country===f.country)&&
-    (f.customer==="All"||w.customer===f.customer)&&
     (f.tier==="All"||w.tier===f.tier)&&
     (f.trainer==="All"||w.leadTrainer===f.trainer||w.coTrainer===f.trainer)&&
     (!dateFrom||!w.date||w.date>=dateFrom)&&
     (!dateTo||!w.date||w.date<=dateTo)
   );
   const wids=new Set(wf.map(w=>w.id));
-  const af=d2.attendees.filter(a=>
-    wids.has(a.workshopId)&&
-    (f.site==="All"||a.site===f.site)&&
-    (f.customer==="All"||a.customer===f.customer)&&
-    (f.country==="All"||a.country===f.country)&&
-    (f.region==="All"||a.region===f.region)
-  );
+  const af=d2.attendees.filter(a=>{
+    if(!wids.has(a.workshopId))return false;
+    if(f.site!=="All"&&a.site!==f.site)return false;
+    if(f.country!=="All"&&a.country!==f.country)return false;
+    if(f.region!=="All"&&a.region!==f.region)return false;
+    if(f.customer!=="All"&&a.customer!==f.customer)return false;
+    return true;
+  });
   const emails=new Set(af.map(a=>a.email));
   const opsEmails=new Set(af.filter(a=>isOps(a.learnerType)).map(a=>a.email));
   return{
@@ -632,7 +632,7 @@ function getFilterOptions(d2){
     regions:uniq([...d2.workshops.map(w=>w.region),...d2.attendees.map(a=>a.region)]),
     countries:uniq([...d2.workshops.map(w=>w.country),...d2.attendees.map(a=>a.country)]),
     sites:uniq(d2.attendees.map(a=>a.site)),
-    customers:uniq([...d2.workshops.map(w=>w.customer),...d2.attendees.map(a=>a.customer)]),
+    customers:uniq(d2.attendees.map(a=>a.customer)),
     trainers:uniq([...d2.workshops.map(w=>w.leadTrainer),...d2.workshops.map(w=>w.coTrainer)]),
   };
 }
@@ -1196,21 +1196,36 @@ function viewLearners(){
   }).sort((a,b)=>a.name.localeCompare(b.name));
 
   // Apply search filter
+  const opsFilteredLearners = window.learnerOpsFilter==="Ops Only"
+    ? learners.filter(l=>isOps(l.learnerType))
+    : window.learnerOpsFilter==="Non-Ops Only"
+    ? learners.filter(l=>!isOps(l.learnerType))
+    : learners;
+
   const filteredLearners=learnerSearch
-    ? learners.filter(l=>{
+    ? opsFilteredLearners.filter(l=>{
         const q=learnerSearch.toLowerCase();
         return [l.name,l.email,l.site,l.customer,l.region,l.country,...l.trainers].some(v=>v&&v.toLowerCase().includes(q));
       })
-    : learners;
+    : opsFilteredLearners;
 
   const d=document.createElement("div");
   const exportBtn=document.createElement("button");
   exportBtn.className="export-btn";
   exportBtn.innerHTML="📥 Export to Excel";
   exportBtn.onclick=()=>exportLearners(learners);
+  // Non-ops filter
+  if(!window.learnerOpsFilter)window.learnerOpsFilter="All";
+  const opsToggle=document.createElement("div");
+  opsToggle.style.cssText="display:flex;align-items:center;gap:8px;margin-bottom:12px;";
+  opsToggle.innerHTML=`<span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Show:</span>
+    ${["All","Ops Only","Non-Ops Only"].map(o=>`<button onclick="window.learnerOpsFilter='${o}';render();"
+      style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${window.learnerOpsFilter===o?"#002664":"#d1d5db"};background:${window.learnerOpsFilter===o?"#002664":"#fff"};color:${window.learnerOpsFilter===o?"#fff":"#6b7280"}">${o}</button>`).join("")}`;
+
   d.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div class="page-title">Learners <span style="font-size:14px;color:#9ca3af;font-weight:400">${filteredLearners.length}${learnerSearch?" of "+learners.length:""} records</span></div></div>`;
   d.querySelector("div").appendChild(exportBtn);
   d.appendChild(buildFilterBar());
+  d.appendChild(opsToggle);
   const {wrap:lSearch}=buildSearchBar("Search by name, email, site, customer, trainer…", learnerSearch, v=>{learnerSearch=v;render();});
   d.appendChild(lSearch);
   const panel=document.createElement("div");panel.className="panel";
@@ -1558,10 +1573,10 @@ function viewByTier(){
   }
   const wsIds=new Set(ws.map(w=>w.id));
   const att=fd.attendees.filter(a=>wsIds.has(a.workshopId));
-  const enrolled=new Set(att.filter(a=>isOps(a.learnerType)).map(a=>a.email)).size;
+  const enrolled=new Set(att.map(a=>a.email)).size;
   const trained=new Set(fd.exams.filter(x=>x.tier===tier&&x.passed).map(x=>x.email)).size;
-  const trainedEmails=new Set(fd.exams.filter(x=>x.tier===tier&&x.passed&&fd.opsEmails.has(x.email)).map(x=>x.email));
-  const certified=new Set(fd.projects.filter(p=>p.tier===tier&&isApproved(p)&&trainedEmails.has(p.email)&&fd.opsEmails.has(p.email)).map(p=>p.email)).size;
+  const trainedEmails=new Set(fd.exams.filter(x=>x.tier===tier&&x.passed&&fd.emails.has(x.email)).map(x=>x.email));
+  const certified=new Set(fd.projects.filter(p=>p.tier===tier&&isApproved(p)&&trainedEmails.has(p.email)).map(p=>p.email)).size;
   const tp=pct(trained,enrolled), cp=pct(certified,enrolled);
 
   const kpis=document.createElement("div");kpis.className="kpi-grid";kpis.style.cssText="grid-template-columns:repeat(4,1fr);margin-bottom:20px;";
@@ -1593,7 +1608,7 @@ function viewByTier(){
     if(!regionMap[r])regionMap[r]={r,enrolled:new Set(),trained:new Set(),certified:new Set()};
     regionMap[r].enrolled.add(a.email);
     if(fd.exams.find(x=>x.email===a.email&&x.tier===tier&&x.passed))regionMap[r].trained.add(a.email);
-    if(fd.exams.find(x=>x.email===a.email&&x.tier===tier&&x.passed)&&fd.projects.find(p=>p.email===a.email&&p.tier===tier&&isApproved(p)))regionMap[r].certified.add(a.email);
+    if((fd.exams.find(x=>x.email===a.email&&x.tier===tier&&x.passed)||isManualCertified(a.email,tier))&&fd.projects.find(p=>p.email===a.email&&p.tier===tier&&isApproved(p)))regionMap[r].certified.add(a.email);
   });
   const regionRows=Object.values(regionMap).map(rm=>({region:rm.r,enrolled:rm.enrolled.size,trained:rm.trained.size,certified:rm.certified.size,tp:pct(rm.trained.size,rm.enrolled.size),cp:pct(rm.certified.size,rm.enrolled.size)})).sort((a,b)=>b.enrolled-a.enrolled);
 
@@ -1636,16 +1651,25 @@ function viewByTier(){
   lp.innerHTML=`<div class="panel-title">${tier} Learners (${learners.length})</div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Filter by status:</span>
+          <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Status:</span>
           ${["All","No Exam Yet","Attended Not Passed","Trained","Certified"].map(s=>`
             <button onclick="tierStatusFilter='${s}';render();"
               style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${tierStatusFilter===s?"#002664":"#d1d5db"};background:${tierStatusFilter===s?"#002664":"#fff"};color:${tierStatusFilter===s?"#fff":"#6b7280"}">${s}</button>`).join("")}
         </div>
-        <button onclick="exportTierLearners('${tier}',window._tierLearners&&window._tierLearners['${tier}'])"
-          style="padding:5px 14px;background:#002664;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif">📥 Export</button>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Show:</span>
+          ${["All","Ops","Non-Ops"].map(o=>`<button onclick="if(!window.tierOpsFilter)window.tierOpsFilter={};window.tierOpsFilter['${tier}']='${o}';render();"
+            style="padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${(window.tierOpsFilter&&window.tierOpsFilter['${tier}']||'All')==='${o}'?"#002664":"#d1d5db"};background:${(window.tierOpsFilter&&window.tierOpsFilter['${tier}']||'All')==='${o}'?"#002664":"#fff"};color:${(window.tierOpsFilter&&window.tierOpsFilter['${tier}']||'All')==='${o}'?"#fff":"#6b7280"}">${o}</button>`).join("")}
+          <button onclick="exportTierLearners('${tier}',window._tierLearners&&window._tierLearners['${tier}'])"
+            style="padding:5px 14px;background:#002664;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;margin-left:6px">📥 Export</button>
+        </div>
       </div>
       <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Site</th><th>Customer</th><th>Region</th><th class="center">Score</th><th>Status</th></tr></thead><tbody>${
-    (tierStatusFilter==="All"?learners:learners.filter(l=>l.status===tierStatusFilter)).map((l,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
+    (()=>{
+        const tierOpsF=window.tierOpsFilter&&window.tierOpsFilter[tier]||"All";
+        const opsList=tierOpsF==="Ops"?learners.filter(l=>isOps(l.learnerType)):tierOpsF==="Non-Ops"?learners.filter(l=>!isOps(l.learnerType)):learners;
+        return(tierStatusFilter==="All"?opsList:opsList.filter(l=>l.status===tierStatusFilter));
+      })().map((l,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
       <td style="font-weight:600;white-space:nowrap">${l.name}</td>
       <td style="font-size:13px;color:#6b7280">${l.email}</td>
       <td style="font-size:12px">${l.site||"—"}</td>
