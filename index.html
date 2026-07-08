@@ -618,7 +618,9 @@ function getFilteredData(){
   );
   const wids=new Set(wf.map(w=>w.id));
   const af=d2.attendees.filter(a=>{
-    if(!wids.has(a.workshopId))return false;
+    // Include learners with no workshop (site-based self-directed training)
+    // but still apply other filters
+    if(a.workshopId&&!wids.has(a.workshopId))return false;
     if(f.site!=="All"&&a.site!==f.site)return false;
     if(f.country!=="All"&&a.country!==f.country)return false;
     if(f.region!=="All"&&a.region!==f.region)return false;
@@ -896,8 +898,9 @@ function parseExcelFile(wb){
   const workshops=wsRaw.map(r=>{const k=Object.keys(r);const _ws=norm(r[findCol(k,"site")||""]||""),_wc=norm(r[findCol(k,"customer","client","account")||""]||"");
     const _dateRaw=r[findCol(k,"date","workshop date","training date")||""];
     return{id:norm(r[findCol(k,"workshop id","id","ws id")||""]),tier:norm(r[findCol(k,"tier")||""]),date:xlSerialToDate(_dateRaw),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),site:_ws,customer:extractCustomer(_ws,_wc),leadTrainer:norm(r[findCol(k,"lead trainer","lead")||""]),coTrainer:norm(r[findCol(k,"co-trainer","co trainer","cotrainer")||""])};}).filter(w=>w.tier||w.date);
-  const attendees=attRaw.map(r=>{const k=Object.keys(r);const _wsId=norm(r[findCol(k,"workshop id","workshop")||""]||"");const _em=normLow(r[findCol(k,"email","email / id","email/id","badge","employee id","id")||""]||"");const _nm=norm(r[findCol(k,"name","full name")||""]||"");const _st=norm(r[findCol(k,"site","location")||""]||"");const _cu=norm(r[findCol(k,"customer","client","account")||""]||"");const _co=norm(r[findCol(k,"country")||""]||"");const _re=norm(r[findCol(k,"region")||""]||"");return{workshopId:_wsId,email:_em,name:_nm,site:_st,customer:extractCustomer(_st,_cu),country:_co,region:_re,learnerType:norm(r[findCol(k,"learner type","type")||""]||""),role:norm(r[findCol(k,"role","job title","position")||""]||""),department:norm(r[findCol(k,"department","dept")||""]||"")};}).map(a=>{
-    if((!a.email||!a.email.includes("@"))&&a.name){
+  const attendees=attRaw.map(r=>{const k=Object.keys(r);const _wsId=norm(r[findCol(k,"workshop id","workshop")||""]||"");const _em=normLow(r[findCol(k,"email","email / id","email/id","badge","employee id","id")||""]||"");const _nm=norm(r[findCol(k,"name","full name")||""]||"");const _st=norm(r[findCol(k,"site","location")||""]||"");const _cu=norm(r[findCol(k,"customer","client","account")||""]||"");const _co=norm(r[findCol(k,"country")||""]||"");const _re=norm(r[findCol(k,"region")||""]||"");return{workshopId:_wsId,email:_em,name:_nm,site:_st,customer:extractCustomer(_st,_cu),country:_co,region:_re,trainer:norm(r[findCol(k,"trainer","lead trainer","instructor")||""]||""),learnerType:norm(r[findCol(k,"learner type","type")||""]||""),role:norm(r[findCol(k,"role","job title","position")||""]||""),department:norm(r[findCol(k,"department","dept")||""]||"")};}).map(a=>{
+    // Auto-gen email/ID if missing but name exists
+    if((!a.email||!a.email.includes("@"))&&!a.email&&a.name){
       const namePart=a.name.toLowerCase().replace(/\s+/g,".").replace(/[^a-z0-9.]/g,"");
       const sitePart=(a.site||"internal").toLowerCase().replace(/\s+/g,"-").replace(/[^a-z0-9-]/g,"");
       if(!data)data={...SAMPLE};
@@ -905,8 +908,9 @@ function parseExcelFile(wb){
       if(data)data._internalIdCounter=ctr;
       a.email=`${namePart}.${sitePart}.${ctr}@internal`;
     }
+    // workshopId can be blank — learner exists without a workshop
     return a;
-  }).filter(a=>a.name);
+  }).filter(a=>a.name||a.email);
 
   // Parse exams - best score per email+tier
   const firstMap={},bestMap={};
@@ -1156,9 +1160,13 @@ function viewLearners(){
     const passed=exams.filter(x=>x.passed);
     const approved=fd.projects.filter(p=>p.email===l.email&&isApproved(p)&&fd.exams.find(x=>x.email===l.email&&x.tier===p.tier&&x.passed));
     const manualCertTiers=TIERS.filter(t=>isManualCertified(l.email,t));
-    const attendedWsIds=[...new Set(fd.attendees.filter(a=>a.email===l.email).map(a=>a.workshopId))];
+    const attendedAtts=fd.attendees.filter(a=>a.email===l.email);
+    const attendedWsIds=[...new Set(attendedAtts.map(a=>a.workshopId).filter(Boolean))];
     const trainerSet=new Set();
+    // Get trainer from workshop record
     attendedWsIds.forEach(wid=>{const ws=wsMap[wid];if(ws&&ws.leadTrainer)trainerSet.add(ws.leadTrainer);});
+    // Also get trainer directly from attendee record (for no-workshop learners)
+    attendedAtts.forEach(a=>{if(a.trainer)trainerSet.add(a.trainer);});
     // Projects: submitted (any) and approved (with passed exam)
     const allProjects=fd.projects.filter(p=>p.email===l.email);
     const projectsByTier=TIERS.reduce((m,t)=>{
@@ -1361,12 +1369,18 @@ window.showLearnerProfile = function(email){
   const att = atts[0];
 
   // Gather all data for this learner
-  const wsIds = new Set(atts.map(a=>a.workshopId));
+  const wsIds = new Set(atts.map(a=>a.workshopId).filter(Boolean));
   const workshops = d2.workshops.filter(w=>wsIds.has(w.id));
   const exams = d2.exams.filter(x=>x.email===email);
   const allAttempts = (d2.allExamRows||[]).filter(r=>r.email===email);
   const projects = d2.projects.filter(p=>p.email===email);
-  const trainers = [...new Set(workshops.map(w=>w.leadTrainer).filter(Boolean))];
+  // Trainers from workshops + directly from attendee records
+  const trainerSet=new Set([
+    ...workshops.map(w=>w.leadTrainer).filter(Boolean),
+    ...atts.map(a=>a.trainer).filter(Boolean),
+    ...allAttempts.map(a=>a.trainer).filter(Boolean),
+  ]);
+  const trainers=[...trainerSet];
   const trainedEmailTiers = new Set(exams.filter(x=>x.passed).map(x=>x.email+"||"+x.tier));
 
   // Per-tier status
@@ -1616,7 +1630,7 @@ function viewByTier(){
   const kpis=document.createElement("div");kpis.className="kpi-grid";kpis.style.cssText="grid-template-columns:repeat(4,1fr);margin-bottom:20px;";
   kpis.innerHTML=`
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Workshops</div><div class="kpi-value" style="color:#002664">${ws.length}</div></div>
-    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Enrolled</div><div class="kpi-value" style="color:#002664">${enrolled}</div></div>
+    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Attended</div><div class="kpi-value" style="color:#002664">${enrolled}</div></div>
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Trained</div><div class="kpi-value" style="color:#002664">${trained}</div><div class="kpi-sub">${tp}% of enrolled</div></div>
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Certified</div><div class="kpi-value" style="color:#002664">${certified}</div><div class="kpi-sub">${cp}% of enrolled</div></div>
   `;
@@ -1648,7 +1662,7 @@ function viewByTier(){
 
   if(regionRows.length){
     const rp=document.createElement("div");rp.className="panel";
-    rp.innerHTML=`<div class="panel-title">Breakdown by Region</div><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Region</th><th class="center">Enrolled</th><th class="center">Trained</th><th>Trained %</th><th class="center">Certified</th><th>Certified %</th></tr></thead><tbody>${
+    rp.innerHTML=`<div class="panel-title">Breakdown by Region</div><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Region</th><th class="center">Attended</th><th class="center">Trained</th><th>Trained %</th><th class="center">Certified</th><th>Certified %</th></tr></thead><tbody>${
       regionRows.map((r,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
         <td style="font-weight:600">${r.region}</td>
         <td class="center">${r.enrolled}</td>
@@ -1682,7 +1696,7 @@ function viewByTier(){
   window._tierLearners[tier]=learners;
 
   const lp=document.createElement("div");lp.className="panel";
-  lp.innerHTML=`<div class="panel-title">${tier} Learners (${learners.length})</div>
+  lp.innerHTML=`<div class="panel-title">${tier} Learners (${(()=>{const tierOpsF=window.tierOpsFilter&&window.tierOpsFilter[tier]||"All";const opsList=tierOpsF==="Ops"?learners.filter(l=>isOps(l.learnerType)):tierOpsF==="Non-Ops"?learners.filter(l=>!isOps(l.learnerType)):learners;return(tierStatusFilter==="All"?opsList:opsList.filter(l=>l.status===tierStatusFilter)).length;})()}${tierStatusFilter!=="All"||((window.tierOpsFilter&&window.tierOpsFilter[tier]||"All")!=="All")?" of "+learners.length:""})</div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Status:</span>
@@ -1746,7 +1760,7 @@ function viewAddWorkshop(){
       const tier=document.getElementById("ws-tier").value;
       const date=document.getElementById("ws-date").value;
       const msg=document.getElementById("ws-msg");
-      if(!tier||!date){msg.innerHTML='<div class="alert-error">Tier and Date are required.</div>';return;}
+      // Tier and date are optional for site-only learner records
       const d2=data||{...SAMPLE};
       const newW={id:genId(),tier,date,region:document.getElementById("ws-region").value,country:document.getElementById("ws-country").value,site:document.getElementById("ws-site").value,customer:document.getElementById("ws-customer").value,leadTrainer:document.getElementById("ws-lead").value,coTrainer:document.getElementById("ws-co").value};
       if(!data){data={...SAMPLE};}
@@ -1936,7 +1950,7 @@ function viewAddLearners(){
       saveData(data);
       showSave("✓ Saved","#86efac");
 
-      msg.innerHTML=`<div class="alert-success">✓ ${rows.length} learner${rows.length!==1?"s":""} added to a new ${tier} session on ${date}.</div>`;
+      msg.innerHTML=`<div class="alert-success">✓ ${rows.length} learner${rows.length!==1?"s":""} added${tier&&date?` to a ${tier} session on ${date}`:" (no workshop linked)"}.`;</div>`;
 
       // Reset session fields but keep tier/date/site/trainer for easy repeat entry
       rowsEl.innerHTML="";
@@ -2275,7 +2289,7 @@ function viewUpload(){
       <div class="uz-icon">📂</div>
       <div class="uz-title">Click to choose file</div>
       <div class="uz-sub">.xlsx or .xls — Tabs: Workshops, Attendees, Exam Results, Projects, Trainers</div>
-      <div style="font-size:11px;color:#9ca3af;margin-top:6px">In the Attendees tab, add a <strong>Learner Type</strong> column (values: Ops, Non-Ops, Management, Support, etc.). Blank defaults to Ops. Non-Ops learners are kept but excluded from KPI totals.</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:6px">In the Attendees tab, add a <strong>Trainer</strong> column (for learners not linked to a workshop) and a <strong>Learner Type</strong> column (values: Ops, Non-Ops, Management, Support, etc.). Blank defaults to Ops. Non-Ops learners are kept but excluded from KPI totals.</div>
     </div>
   `;
   d.appendChild(panel);
@@ -2349,9 +2363,8 @@ function viewUpload(){
               const rawRows=sheet("attend");
               // ── Validate and process each row ──
               const valid=[], skipped=[], warnings=[];
-              const missingEmail=[], missingName=[], missingWorkshopId=[], autoWsCreated=[];
+              const missingEmail=[], missingName=[], missingWorkshopId=[];
               // Track auto-workshops created for no-ID rows: key = tier|site|date -> wsId
-              const autoWsMap={};
 
               rawRows.forEach((r,rowNum)=>{
                 const k=Object.keys(r);
@@ -2387,39 +2400,20 @@ function viewUpload(){
                 // Missing name — warn but keep
                 if(!name) missingName.push(finalEmail);
 
-                // Handle missing Workshop ID
-                let finalWsId=wsId;
+                // Workshop ID is optional — learner can exist without one
+                let finalWsId=wsId||"";
                 if(!finalWsId){
                   missingWorkshopId.push(displayRow);
-                  // Auto-create a workshop record for this site/tier/date combo
-                  const wsKey=(tier||"Unknown")+"|"+(site||"unknown")+"|"+(dateVal||"unknown");
-                  if(!autoWsMap[wsKey]){
-                    const newWsId=genId();
-                    autoWsMap[wsKey]=newWsId;
-                    if(!data.workshops)data.workshops=[];
-                    data.workshops.push({
-                      id:newWsId,
-                      tier:tier||"",
-                      date:dateVal||"",
-                      site:site||"",
-                      customer:extractCustomer(site||"",customer||""),
-                      region:region||"",
-                      country:country||"",
-                      leadTrainer:"",
-                      coTrainer:"",
-                      _autoCreated:true,
-                    });
-                    autoWsCreated.push({id:newWsId,tier:tier||"(no tier)",site:site||"(no site)",date:dateVal||"(no date)"});
-                  }
-                  finalWsId=autoWsMap[wsKey];
                 }
 
+                const trainerVal=norm(r[findCol(k,"trainer","lead trainer","instructor")||""]||"");
                 valid.push({
                   workshopId:finalWsId,
                   email:finalEmail,
                   name:name||finalEmail,
                   site,customer:extractCustomer(site,customer),region,country,
                   learnerType,role,department:dept,
+                  trainer:trainerVal,
                 });
               });
 
@@ -2434,7 +2428,6 @@ function viewUpload(){
                 missingEmail,
                 missingName,
                 missingWorkshopId,
-                autoWsCreated,
               };
             } else if(uploadTab==="exams"){
               const raw=sheet("exam")||sheet(wb.SheetNames[0]);
@@ -2492,7 +2485,7 @@ function viewUpload(){
             feedbackHtml+=`<div class="uf-warn" style="border-color:#fca5a5;background:#fff1f2">⚠ <strong>${val.missingName.length} row${val.missingName.length!==1?"s":""} missing Name</strong> — imported using Email/ID as display name:<br><span style="font-size:10px;color:#6b7280">${val.missingName.slice(0,5).join(", ")}${val.missingName.length>5?" + "+(val.missingName.length-5)+" more":""}</span></div>`;
           }
           if(val.missingWorkshopId&&val.missingWorkshopId.length>0){
-            feedbackHtml+=`<div class="uf-warn" style="border-color:#a5b4fc;background:#eef2ff">ℹ <strong>${val.missingWorkshopId.length} learner${val.missingWorkshopId.length!==1?"s":""} had no Workshop ID</strong> — auto-workshop records created (${val.autoWsCreated&&val.autoWsCreated.length} session${val.autoWsCreated&&val.autoWsCreated.length!==1?"s":""}):<br><span style="font-size:10px;color:#6b7280">${(val.autoWsCreated||[]).map(w=>`${w.tier||"?"} · ${w.site||"?"} · ${w.date||"?"}`).slice(0,4).join(" | ")}${(val.autoWsCreated||[]).length>4?" + more":""}</span></div>`;
+            feedbackHtml+=`<div class="uf-warn" style="border-color:#a5b4fc;background:#eef2ff">ℹ <strong>${val.missingWorkshopId.length} learner${val.missingWorkshopId.length!==1?"s":""} had no Workshop ID</strong> — imported without workshop link (site-directed training):<br><span style="font-size:10px;color:#6b7280">${(val.autoWsCreated||[]).map(w=>`${w.tier||"?"} · ${w.site||"?"} · ${w.date||"?"}`).slice(0,4).join(" | ")}${(val.autoWsCreated||[]).length>4?" + more":""}</span></div>`;
           }
         }
 
