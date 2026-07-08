@@ -1695,8 +1695,13 @@ function viewByTier(){
   if(!window._tierLearners)window._tierLearners={};
   window._tierLearners[tier]=learners;
 
+  // Pre-compute filtered count for display
+  const _tierOpsF=window.tierOpsFilter&&window.tierOpsFilter[tier]||"All";
+  const _opsList=_tierOpsF==="Ops"?learners.filter(l=>isOps(l.learnerType)):_tierOpsF==="Non-Ops"?learners.filter(l=>!isOps(l.learnerType)):learners;
+  const filteredTierCount=(tierStatusFilter==="All"?_opsList:_opsList.filter(l=>l.status===tierStatusFilter)).length;
+
   const lp=document.createElement("div");lp.className="panel";
-  lp.innerHTML=`<div class="panel-title">${tier} Learners (${(()=>{const tierOpsF=window.tierOpsFilter&&window.tierOpsFilter[tier]||"All";const opsList=tierOpsF==="Ops"?learners.filter(l=>isOps(l.learnerType)):tierOpsF==="Non-Ops"?learners.filter(l=>!isOps(l.learnerType)):learners;return(tierStatusFilter==="All"?opsList:opsList.filter(l=>l.status===tierStatusFilter)).length;})()}${tierStatusFilter!=="All"||((window.tierOpsFilter&&window.tierOpsFilter[tier]||"All")!=="All")?" of "+learners.length:""})</div>
+  lp.innerHTML=`<div class="panel-title">${tier} Learners (${filteredTierCount} of ${learners.length})</div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Status:</span>
