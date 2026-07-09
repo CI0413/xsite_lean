@@ -2808,18 +2808,35 @@ function viewReport(){
 <script>window.onload=()=>window.print();<\/script>
 </body></html>`;
 
-  const win=window.open("","_blank");
-  if(win){win.document.write(html);win.document.close();}
-  else{alert("Please allow popups to print the report.");}
+  // Store html for the button to use directly on click
+  window._reportHtml=html;
+  window._reportDesc=filterDesc;
 
   const d=document.createElement("div");
   d.innerHTML=`<div class="page-title" style="margin-bottom:16px">Print Report</div>
-    <div class="panel" style="text-align:center;padding:40px">
-      <div style="font-size:40px;margin-bottom:12px">📄</div>
-      <div style="font-size:15px;font-weight:600;color:#002664;margin-bottom:8px">Report opened in a new tab</div>
-      <div style="font-size:12px;color:#6b7280;margin-bottom:20px">Scope: ${filterDesc}</div>
-      <button onclick="viewReport()" style="padding:10px 24px;background:#002664;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif">Generate Again</button>
+    <div class="panel" style="text-align:center;padding:48px 40px">
+      <div style="font-size:48px;margin-bottom:16px">📄</div>
+      <div style="font-size:16px;font-weight:600;color:#002664;margin-bottom:8px">Program Summary Report</div>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:6px">Scope: <strong>${filterDesc}</strong></div>
+      <div style="font-size:11px;color:#9ca3af;margin-bottom:24px">Set filters on the dashboard before generating to scope the report to a specific customer, region, or tier.</div>
+      <button id="open-report-btn" style="padding:12px 32px;background:#002664;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif">Open & Print Report</button>
     </div>`;
+  setTimeout(()=>{
+    const btn=document.getElementById("open-report-btn");
+    if(btn){
+      btn.onclick=()=>{
+        const win=window.open("","_blank");
+        if(win){win.document.write(window._reportHtml);win.document.close();}
+        else{
+          // Fallback: download as HTML file
+          const blob=new Blob([window._reportHtml],{type:"text/html"});
+          const url=URL.createObjectURL(blob);
+          const a=document.createElement("a");
+          a.href=url;a.download="DSV_Lean_Training_Report.html";a.click();
+        }
+      };
+    }
+  },0);
   return d;
 }
 
