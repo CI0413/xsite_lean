@@ -847,6 +847,7 @@ const NAV_ITEMS=[
   {id:"add-project",label:"Add Project",icon:"💡"},
   {id:"upload",label:"Upload Data",icon:"⬆"},
   {id:"analytics",label:"Exam Analytics",icon:"🔬"},
+  {id:"report",label:"Print Report",icon:"📄"},
 ];
 function buildNav(){
   const nav=document.getElementById("nav");
@@ -3315,6 +3316,7 @@ function render(){
     "add-project":viewAddProject,
     upload:viewUpload,
     analytics:viewAnalytics,
+    report:viewReport,
   };
   const view=views[activeNav]||viewExecutive;
   container.appendChild(view());
