@@ -290,8 +290,20 @@ function trainerStatus(trainer, tier){
 }
 
 function isManualCertified(email, tier){
+  // Legacy full cert override (kept for backward compat)
   const d2=data||SAMPLE;
-  return !!(d2.certOverrides&&d2.certOverrides[email+"||"+tier]);
+  const ov=d2.certOverrides&&d2.certOverrides[email+"||"+tier];
+  return !!(ov&&(ov===true||ov.certified));
+}
+function isProjectWaived(email, tier){
+  const d2=data||SAMPLE;
+  const w=d2.projectWaivers&&d2.projectWaivers[email+"||"+tier];
+  return !!(w);
+}
+function getWaiverNote(email, tier){
+  const d2=data||SAMPLE;
+  const w=d2.projectWaivers&&d2.projectWaivers[email+"||"+tier];
+  return (w&&w.note)||"";
 }
 
 function isOps(learnerType){
@@ -672,6 +684,7 @@ function buildDateRange(){
   return wrap;
 }
 
+let _searchDebounce=null;
 function buildSearchBar(placeholder, value, onChange){
   const wrap=document.createElement("div");
   wrap.className="search-bar";
@@ -679,7 +692,21 @@ function buildSearchBar(placeholder, value, onChange){
   input.type="text";
   input.placeholder=placeholder;
   input.value=value;
-  input.oninput=e=>onChange(e.target.value);
+  input.setAttribute("data-search","1");
+  input.oninput=e=>{
+    const v=e.target.value;
+    // Update state variable directly without full re-render on each keystroke
+    onChange(v);
+    clearTimeout(_searchDebounce);
+    _searchDebounce=setTimeout(()=>{
+      const activeEl=document.activeElement;
+      const pos=activeEl?activeEl.selectionStart:null;
+      render();
+      // Restore focus and cursor position
+      const newInput=document.querySelector("input[data-search='1']");
+      if(newInput){newInput.focus();if(pos!==null)try{newInput.setSelectionRange(pos,pos);}catch(e){}}
+    },0);
+  };
   const icon=document.createElement("span");
   icon.className="s-icon";icon.textContent="🔍";
   wrap.appendChild(icon);
@@ -893,7 +920,7 @@ function parseExcelFile(wb){
     });
     return rows;
   }
-  const wsRaw=sheet("workshop"), attRaw=sheet("attend"), examRaw=sheet("exam"), projRaw=sheet("project"), trRaw=sheet("trainer");
+  const wsRaw=sheet("workshop"), attRaw=sheet("attend"), examRaw=sheet("exam"), projRaw=sheet("project"), trRaw=sheet("trainer"), certOvRaw=sheet("cert");
 
   const workshops=wsRaw.map(r=>{const k=Object.keys(r);const _ws=norm(r[findCol(k,"site")||""]||""),_wc=norm(r[findCol(k,"customer","client","account")||""]||"");
     const _dateRaw=r[findCol(k,"date","workshop date","training date")||""];
@@ -974,7 +1001,21 @@ function parseExcelFile(wb){
 
   const trainers=trRaw.map(r=>{const k=Object.keys(r);const yn=key=>{const v=norm(r[findCol(k,key)||""]).toLowerCase();return v==="yes"||v==="true";};return{name:norm(r[findCol(k,"name","trainer name","full name")||""]),email:normLow(r[findCol(k,"email","email / id","email/id")||""]||""),site:norm(r[findCol(k,"site","location")||""]||""),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),customer:norm(r[findCol(k,"customer")||""]),q1a:yn("qualified 1a"),q1b:yn("qualified 1b"),q1c:yn("qualified 1c"),date1a:xlSerialToDate(r[findCol(k,"date certified 1a","date 1a")||""]),date1b:xlSerialToDate(r[findCol(k,"date certified 1b","date 1b")||""]),date1c:xlSerialToDate(r[findCol(k,"date certified 1c","date 1c")||""]),lead1a:norm(r[findCol(k,"lead trainer 1a","lead 1a")||""]||""),lead1b:norm(r[findCol(k,"lead trainer 1b","lead 1b")||""]||""),lead1c:norm(r[findCol(k,"lead trainer 1c","lead 1c")||""]||"")};}).filter(t=>t.name);
 
-  return{workshops,attendees,exams,allExamRows:allRows,firstPassRate,avgScore,projects,trainers,questionLabels};
+  // Parse project waivers
+  const projectWaivers={...(data&&data.projectWaivers||{})};
+  certOvRaw.forEach(r=>{
+    const k=Object.keys(r);
+    const email=normLow(r[findCol(k,"email","email / id","email/id")||""]||"");
+    const tier=norm(r[findCol(k,"tier")||""]||"");
+    const waived=norm(r[findCol(k,"project waived","waived","certified")||""]||"").toLowerCase();
+    const note=norm(r[findCol(k,"note","notes","reason")||""]||"");
+    if(!email||!tier)return;
+    const key=email+"||"+tier;
+    if(waived==="yes"||waived==="true")projectWaivers[key]={note};
+    else if(waived==="no"||waived==="false")delete projectWaivers[key];
+  });
+
+  return{workshops,attendees,exams,allExamRows:allRows,firstPassRate,avgScore,projects,trainers,questionLabels,projectWaivers};
 }
 
 // ── Views ─────────────────────────────────────────────────────────
@@ -999,7 +1040,8 @@ function viewExecutive(){
     const c=TIER_COLOR[tier]||NAVY;
     const tp=pct(tr,att);
     const _tET=new Set(fd.exams.filter(x=>x.tier===tier&&x.passed&&fd.opsEmails.has(x.email)).map(x=>x.email));
-    const cert=new Set(fd.projects.filter(p=>p.tier===tier&&isApproved(p)&&_tET.has(p.email)).map(p=>p.email)).size;
+    const _waived=fd.exams.filter(x=>x.tier===tier&&x.passed&&fd.opsEmails.has(x.email)&&isProjectWaived(x.email,tier)).map(x=>x.email);
+    const cert=new Set([...fd.projects.filter(p=>p.tier===tier&&isApproved(p)&&_tET.has(p.email)).map(p=>p.email),..._waived]).size;
     return `<tr>
       <td><span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot" style="background:${c}"></span><span style="color:${c};font-weight:700">${tier}</span></span></td>
       <td class="center" style="font-weight:600">${att}</td>
@@ -1436,10 +1478,11 @@ window.showLearnerProfile = function(email){
         const b=TIER_BG[t.tier]||"#f3f4f6";
         const sc2=STATUS_COLOR[t.status]||"#9ca3af";
         const sb2=STATUS_BG[t.status]||"#f3f4f6";
-        const manualCert=isManualCertified(email,t.tier);
-        const overrideBtn=`<button onclick="toggleCertOverride('${email}','${t.tier}')"
-          style="margin-left:auto;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${manualCert?"#b91c1c":"#00682A"};background:${manualCert?"#fee2e2":"#dcfce7"};color:${manualCert?"#b91c1c":"#00682A"}">
-          ${manualCert?"✕ Remove Override":"★ Mark Certified"}</button>`;
+        const waived=isProjectWaived(email,t.tier);
+        const waiverNote=getWaiverNote(email,t.tier);
+        const overrideBtn=`<button onclick="toggleProjectWaiver('${email}','${t.tier}')"
+          style="margin-left:auto;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${waived?"#b91c1c":"#d97706"};background:${waived?"#fee2e2":"#fffbeb"};color:${waived?"#b91c1c":"#b45309"}">
+          ${waived?"✕ Remove Waiver":"⊘ Waive Project Req"}</button>${waived&&waiverNote?`<div style="font-size:10px;color:#6b7280;margin-top:3px;font-style:italic">Note: ${waiverNote}</div>`:""}`;
         return`<div class="tier-row">
           <span class="tr-tier" style="color:${c}">${t.tier}</span>
           <span class="tr-badge" style="background:${sb2};color:${sc2}">${t.status}</span>
@@ -1481,16 +1524,17 @@ window.showLearnerProfile = function(email){
 };
 
 // ── Manual certification override ────────────────────────────────
-window.toggleCertOverride = function(email, tier){
+window.toggleProjectWaiver = function(email, tier){
   if(!data)data={...SAMPLE};
-  if(!data.certOverrides)data.certOverrides={};
+  if(!data.projectWaivers)data.projectWaivers={};
   const key=email+"||"+tier;
-  if(data.certOverrides[key]){
-    delete data.certOverrides[key];
-    showSave("Override removed","#fca5a5");
+  if(data.projectWaivers[key]){
+    delete data.projectWaivers[key];
+    showSave("Project waiver removed","#fca5a5");
   } else {
-    data.certOverrides[key]=true;
-    showSave("✓ Marked as Certified","#86efac");
+    const note=prompt("Optional: add a reason for waiving the project requirement\n(e.g. \"Completed equivalent project at prior employer\")","");
+    data.projectWaivers[key]={note:note||""};
+    showSave("✓ Project requirement waived","#86efac");
   }
   usingLive=true;
   saveData(data);
@@ -1619,7 +1663,8 @@ function viewByTier(){
   const enrolled=new Set(att.map(a=>a.email)).size;
   const trained=new Set(fd.exams.filter(x=>x.tier===tier&&x.passed).map(x=>x.email)).size;
   const trainedEmails=new Set(fd.exams.filter(x=>x.tier===tier&&x.passed&&fd.emails.has(x.email)).map(x=>x.email));
-  const certified=new Set(fd.projects.filter(p=>p.tier===tier&&isApproved(p)&&trainedEmails.has(p.email)).map(p=>p.email)).size;
+  const waivedCert=new Set(fd.exams.filter(x=>x.tier===tier&&x.passed&&isProjectWaived(x.email,tier)&&fd.emails.has(x.email)).map(x=>x.email));
+  const certified=new Set([...fd.projects.filter(p=>p.tier===tier&&isApproved(p)&&trainedEmails.has(p.email)).map(p=>p.email),...waivedCert]).size;
   const tp=pct(trained,enrolled), cp=pct(certified,enrolled);
 
   const kpis=document.createElement("div");kpis.className="kpi-grid";kpis.style.cssText="grid-template-columns:repeat(4,1fr);margin-bottom:20px;";
@@ -2334,6 +2379,7 @@ function viewUpload(){
           if(uploadTab==="full"){
             const parsed=parseExcelFile(wb);
             data={...data,...parsed};if(parsed.questionLabels&&Object.keys(parsed.questionLabels).length){data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};}
+              if(parsed.projectWaivers)data.projectWaivers=parsed.projectWaivers;
           } else {
             function sheet(name){
               const sn=wb.SheetNames.find(n=>normLow(n).includes(normLow(name)));
@@ -2444,7 +2490,26 @@ function viewUpload(){
             } else if(uploadTab==="projects"){
               const rows=sheet("project").map(r=>{const k=Object.keys(r);return{email:normLow(r[findCol(k,"email")||""]),tier:norm(r[findCol(k,"tier")||""]),submitted:norm(r[findCol(k,"submitted")||""]),approved:norm(r[findCol(k,"approved")||""]),savings:parseFloat((r[findCol(k,"savings ($)","savings","cost savings","saving")||""]||"").toString().replace(/[$,()]/g,""))||0};}).filter(p=>p.email);
               data.projects=uploadMode==="replace"?rows:[...data.projects,...rows];
-            } else if(uploadTab==="trainers"){
+            } else if(uploadTab==="certoverrides"){
+              const raw=sheet("cert")||XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:""});
+              if(!data.projectWaivers)data.projectWaivers={};
+              let added=0,removed=0;
+              raw.forEach(r=>{
+                const k=Object.keys(r);
+                const email=normLow(r[findCol(k,"email","email / id","email/id")||""]||"");
+                const tier=norm(r[findCol(k,"tier")||""]||"");
+                const waived=norm(r[findCol(k,"project waived","waived","certified")||""]||"").toLowerCase();
+                const note=norm(r[findCol(k,"note","notes","reason")||""]||"");
+                if(!email||!tier)return;
+                const key=email+"||"+tier;
+                if(waived==="yes"||waived==="true"){data.projectWaivers[key]={note};added++;}
+                else if(waived==="no"||waived==="false"){delete data.projectWaivers[key];removed++;}
+              });
+              usingLive=true;saveData(data);render();
+              msg.innerHTML=`<div class="alert-success">✓ Project waivers updated — ${added} added/updated, ${removed} removed.</div>`;
+              setTimeout(()=>msg.innerHTML="",4000);
+            }
+            else if(uploadTab==="trainers"){
               const rows=sheet("trainer").map(r=>{const k=Object.keys(r);const yn=key=>{const v=norm(r[findCol(k,key)||""]).toLowerCase();return v==="yes"||v==="true";};return{name:norm(r[findCol(k,"trainer name","name")||""]),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),customer:norm(r[findCol(k,"customer")||""]),q1a:yn("qualified 1a"),q1b:yn("qualified 1b"),q1c:yn("qualified 1c")};}).filter(t=>t.name);
               data.trainers=uploadMode==="replace"?rows:dedup([...data.trainers,...rows],"name");
             }
@@ -2498,6 +2563,252 @@ function viewUpload(){
       reader.readAsArrayBuffer(file);
     }
   },0);
+  return d;
+}
+
+function viewReport(){
+  const fd=getFilteredData();
+  const d2=data||SAMPLE;
+
+  // Compute all metrics
+  const totalW=fd.workshops.length;
+  const totalL=fd.opsEmails.size;
+  const trained=new Set(fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)).map(x=>x.email)).size;
+  const trainedPct=totalL?Math.round((trained/totalL)*100):0;
+
+  // Certified
+  const tET=new Set(fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)).map(x=>x.email+"||"+x.tier));
+  const certEmails=new Set([
+    ...fd.projects.filter(p=>isApproved(p)&&tET.has(p.email+"||"+p.tier)&&fd.opsEmails.has(p.email)).map(p=>p.email),
+    ...fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&isProjectWaived(x.email,x.tier)).map(x=>x.email),
+  ]);
+  const certified=certEmails.size;
+  const certPct=totalL?Math.round((certified/totalL)*100):0;
+
+  // Exam stats
+  const allRows=fd.allExamRows||[];
+  const fa=Object.values(Object.fromEntries(allRows.map(r=>[r.email+"||"+r.tier+"||first",r]).reverse()));
+  const firstPassRate=fa.length?Math.round(fa.filter(x=>x.passed).length/fa.length*100):0;
+  const avgScore=fd.exams.length?+(fd.exams.reduce((s,x)=>s+x.score,0)/fd.exams.length).toFixed(1):0;
+  const retakers=new Set(allRows.filter((r,i,a)=>a.filter(x=>x.email===r.email&&x.tier===r.tier).length>1).map(r=>r.email+"||"+r.tier)).size;
+
+  // Projects
+  const approved=fd.projects.filter(isApproved);
+  const totalSavings=approved.reduce((s,p)=>s+p.savings,0);
+  const approvalPct=fd.projects.length?Math.round(approved.length/fd.projects.length*100):0;
+  const avgSavings=approved.length?Math.round(totalSavings/approved.length):0;
+
+  // Tier breakdown
+  const tierData=TIERS.map(tier=>{
+    const wsT=fd.workshops.filter(w=>w.tier===tier);
+    const wsIds=new Set(wsT.map(w=>w.id));
+    const att=new Set(fd.attendees.filter(a=>wsIds.has(a.workshopId)&&isOps(a.learnerType)).map(a=>a.email)).size;
+    const tr=new Set(fd.exams.filter(x=>x.tier===tier&&x.passed&&fd.opsEmails.has(x.email)).map(x=>x.email)).size;
+    const tETier=new Set(fd.exams.filter(x=>x.tier===tier&&x.passed&&fd.opsEmails.has(x.email)).map(x=>x.email+"||"+x.tier));
+    const waived=fd.exams.filter(x=>x.tier===tier&&x.passed&&fd.opsEmails.has(x.email)&&isProjectWaived(x.email,tier)).map(x=>x.email);
+    const cert=new Set([...fd.projects.filter(p=>p.tier===tier&&isApproved(p)&&tETier.has(p.email+"||"+p.tier)).map(p=>p.email),...waived]).size;
+    const pct=att?Math.round(tr/att*100):0;
+    return{tier,att,tr,cert,pct};
+  });
+
+  // Needs attention
+  const noExam=fd.attendees.filter(a=>isOps(a.learnerType)&&!fd.exams.find(x=>x.email===a.email)).length;
+  const failedNoRetake=fd.attendees.filter(a=>{
+    const attempts=allRows.filter(r=>r.email===a.email);
+    return attempts.length>0&&!attempts.some(r=>r.passed);
+  }).length;
+  const trainedNoProject=new Set(fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)).map(x=>x.email))
+    .size - fd.projects.filter(p=>fd.opsEmails.has(p.email)).map(p=>p.email).filter((v,i,a)=>a.indexOf(v)===i).length;
+
+  // Top customer by savings
+  const custSavings={};
+  fd.projects.filter(isApproved).forEach(p=>{
+    const a=fd.attendees.find(a=>a.email===p.email);
+    const cust=a?a.customer:"Unknown";
+    if(cust)custSavings[cust]=(custSavings[cust]||0)+p.savings;
+  });
+  const topCustEntries=Object.entries(custSavings).sort((a,b)=>b[1]-a[1]);
+  const topCust=topCustEntries[0]||["—",0];
+
+  // Trainers
+  const certTrainers=fd.trainers.filter(t=>TIERS.some(ti=>trainerStatus(t,ti)==="Certified")).length;
+  const inProgTrainers=fd.trainers.filter(t=>TIERS.some(ti=>trainerStatus(t,ti)==="In Progress")).length;
+
+  // Filter description
+  const f=globalFilters;
+  const filterParts=[];
+  if(f.customer!=="All")filterParts.push(f.customer);
+  if(f.region!=="All")filterParts.push(f.region);
+  if(f.country!=="All")filterParts.push(f.country);
+  if(f.site!=="All")filterParts.push(f.site);
+  if(f.tier!=="All")filterParts.push(f.tier);
+  if(f.trainer!=="All")filterParts.push("Trainer: "+f.trainer);
+  if(filterStartDate||filterEndDate)filterParts.push((filterStartDate||"…")+" to "+(filterEndDate||"…"));
+  const filterDesc=filterParts.length?filterParts.join(" · "):"All regions, all tiers";
+
+  // DSV logo SVG (inline)
+  const logoSVG=`<svg width="60" height="24" viewBox="0 0 60 24" xmlns="http://www.w3.org/2000/svg">
+    <rect width="60" height="24" rx="3" fill="#002664"/>
+    <text x="30" y="17" font-family="Arial,sans-serif" font-size="13" font-weight="700" fill="white" text-anchor="middle">DSV</text>
+  </svg>`;
+
+  const html=`<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<title>DSV Lean Training Report</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:Arial,sans-serif;font-size:12px;color:#1f2937;background:#fff;padding:24px;}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #002664;padding-bottom:12px;margin-bottom:16px;}
+  .header-left{}
+  .eyebrow{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;margin-bottom:3px;}
+  .title{font-size:18px;font-weight:700;color:#002664;}
+  .subtitle{font-size:10px;color:#6b7280;margin-top:3px;}
+  .header-right{text-align:right;font-size:10px;color:#6b7280;}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;}
+  .kpi{background:#f9fafb;border-radius:6px;padding:8px 10px;border-left:3px solid #002664;}
+  .kpi.orange{border-left-color:#E18635;}
+  .kpi.green{border-left-color:#00682A;}
+  .kpi-label{font-size:9px;color:#6b7280;margin-bottom:2px;}
+  .kpi-val{font-size:22px;font-weight:700;color:#002664;}
+  .kpi.green .kpi-val{color:#00682A;}
+  .kpi-sub{font-size:9px;color:#6b7280;}
+  .panel{background:#f9fafb;border-radius:6px;padding:10px 12px;margin-bottom:10px;}
+  .panel-title{font-size:11px;font-weight:700;color:#002664;margin-bottom:8px;}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;}
+  .row{display:flex;justify-content:space-between;font-size:10px;padding:3px 0;border-bottom:0.5px solid #e5e7eb;}
+  .row:last-child{border-bottom:none;}
+  .row .lbl{color:#6b7280;}
+  .row .val{font-weight:600;}
+  .tier-grid{display:grid;grid-template-columns:70px 1fr 44px 44px 44px;gap:5px;align-items:center;margin-bottom:6px;}
+  .tier-hdr{font-size:9px;color:#6b7280;padding-bottom:4px;border-bottom:0.5px solid #e5e7eb;}
+  .bar-bg{height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;}
+  .bar-fill{height:100%;border-radius:3px;}
+  .attn{background:#fff1f2;border:0.5px solid #fca5a5;border-left:3px solid #b91c1c;border-radius:6px;padding:10px 12px;margin-bottom:10px;}
+  .attn-title{font-size:11px;font-weight:700;color:#991b1b;margin-bottom:8px;}
+  .attn-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+  .attn-card{background:#fff;border-radius:4px;padding:6px 8px;}
+  .attn-num{font-size:18px;font-weight:700;}
+  .attn-num.red{color:#b91c1c;}
+  .attn-num.amber{color:#d97706;}
+  .attn-lbl{font-size:9px;color:#6b7280;}
+  .top-cust{background:#fffbeb;border:0.5px solid #fbbf24;border-left:3px solid #E18635;border-radius:6px;padding:10px 12px;margin-bottom:10px;}
+  .top-cust-title{font-size:11px;font-weight:700;color:#92400e;margin-bottom:6px;}
+  .top-cust-row{display:flex;justify-content:space-between;align-items:center;}
+  .cust-pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
+  .pill{font-size:9px;padding:2px 7px;border-radius:3px;background:#e0f2fe;color:#0369a1;}
+  .pill.other{background:#f3f4f6;color:#6b7280;}
+  .footer{font-size:9px;color:#9ca3af;text-align:center;padding-top:10px;border-top:0.5px solid #e5e7eb;margin-top:6px;}
+  @media print{body{padding:16px;}@page{margin:1.5cm;}}
+</style>
+</head><body>
+
+<div class="header">
+  <div class="header-left">
+    <div style="margin-bottom:6px">${logoSVG}</div>
+    <div class="eyebrow">CI & Process Optimization · Americas</div>
+    <div class="title">Lean Training Program Summary</div>
+    <div class="subtitle">Scope: ${filterDesc}</div>
+  </div>
+  <div class="header-right">
+    <div>Generated</div>
+    <div style="font-weight:600;color:#002664">${new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
+    <div style="margin-top:4px">DSV Internal</div>
+  </div>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="kpi-label">Workshops held</div><div class="kpi-val">${totalW}</div></div>
+  <div class="kpi orange"><div class="kpi-label">Unique learners</div><div class="kpi-val">${totalL}</div></div>
+  <div class="kpi orange"><div class="kpi-label">Trained</div><div class="kpi-val">${trained}</div><div class="kpi-sub">${trainedPct}% of learners</div></div>
+  <div class="kpi green"><div class="kpi-label">Certified</div><div class="kpi-val">${certified}</div><div class="kpi-sub">${certPct}% of learners</div></div>
+</div>
+
+<div class="panel">
+  <div class="panel-title">Training by tier</div>
+  <div class="tier-grid tier-hdr"><span>Tier</span><span>Progress</span><span style="text-align:center">Attended</span><span style="text-align:center">Trained</span><span style="text-align:center">Certified</span></div>
+  ${tierData.map(t=>`<div class="tier-grid">
+    <span style="font-size:10px;font-weight:700;color:${TIER_COLOR[t.tier]||'#002664'}">${t.tier}</span>
+    <div class="bar-bg"><div class="bar-fill" style="width:${t.pct}%;background:${TIER_COLOR[t.tier]||'#002664'}"></div></div>
+    <span style="font-size:10px;text-align:center;display:block">${t.att}</span>
+    <span style="font-size:10px;font-weight:700;text-align:center;display:block;color:${TIER_COLOR[t.tier]||'#002664'}">${t.tr}</span>
+    <span style="font-size:10px;font-weight:700;text-align:center;display:block;color:#00682A">${t.cert}</span>
+  </div>`).join("")}
+</div>
+
+<div class="two-col">
+  <div class="panel">
+    <div class="panel-title">Exam performance</div>
+    <div class="row"><span class="lbl">First pass rate</span><span class="val">${firstPassRate}%</span></div>
+    <div class="row"><span class="lbl">Average score</span><span class="val">${avgScore} / 20</span></div>
+    <div class="row"><span class="lbl">Total attempts</span><span class="val">${allRows.length}</span></div>
+    <div class="row"><span class="lbl">Retakers</span><span class="val">${retakers}</span></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Projects & savings</div>
+    <div class="row"><span class="lbl">Submitted</span><span class="val">${fd.projects.length}</span></div>
+    <div class="row"><span class="lbl">Approved</span><span class="val">${approved.length} (${approvalPct}%)</span></div>
+    <div class="row"><span class="lbl">Total savings</span><span class="val" style="color:#00682A">${fmtSavings(totalSavings)}</span></div>
+    <div class="row"><span class="lbl">Avg per project</span><span class="val" style="color:#00682A">${fmtSavings(avgSavings)}</span></div>
+  </div>
+</div>
+
+<div class="top-cust">
+  <div class="top-cust-title">Top customer by savings</div>
+  <div class="top-cust-row">
+    <div>
+      <div style="font-size:15px;font-weight:700;color:#92400e">${topCust[0]}</div>
+      <div style="font-size:9px;color:#b45309;margin-top:2px">${totalSavings?Math.round(topCust[1]/totalSavings*100):0}% of total savings</div>
+    </div>
+    <div style="font-size:20px;font-weight:700;color:#00682A">${fmtSavings(topCust[1])}</div>
+  </div>
+  <div class="cust-pills">
+    ${topCustEntries.slice(0,6).map((e,i)=>`<span class="pill${i>0?" other":""}">${e[0]} ${fmtSavings(e[1])}</span>`).join("")}
+    ${topCustEntries.length>6?`<span class="pill other">+${topCustEntries.length-6} more</span>`:""}
+  </div>
+</div>
+
+<div class="attn">
+  <div class="attn-title">Needs attention</div>
+  <div class="attn-grid">
+    <div class="attn-card"><div class="attn-num red">${noExam}</div><div class="attn-lbl">attended — no exam taken</div></div>
+    <div class="attn-card"><div class="attn-num red">${failedNoRetake}</div><div class="attn-lbl">exam failed — not retaken</div></div>
+    <div class="attn-card"><div class="attn-num amber">${Math.max(0,trainedNoProject)}</div><div class="attn-lbl">trained — no project submitted</div></div>
+    <div class="attn-card"><div class="attn-num amber">${fd.trainers.length?inProgTrainers:0}</div><div class="attn-lbl">trainers in progress</div></div>
+  </div>
+</div>
+
+<div class="two-col">
+  <div class="panel">
+    <div class="panel-title">Trainer roster</div>
+    <div class="row"><span class="lbl">Total trainers</span><span class="val">${fd.trainers.length}</span></div>
+    <div class="row"><span class="lbl">Certified</span><span class="val" style="color:#00682A">${certTrainers}</span></div>
+    <div class="row"><span class="lbl">In progress</span><span class="val" style="color:#E18635">${inProgTrainers}</span></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Program overview</div>
+    <div class="row"><span class="lbl">Exam pass threshold</span><span class="val">16 / 20</span></div>
+    <div class="row"><span class="lbl">Tiers offered</span><span class="val">1A · 1B · 1C</span></div>
+    <div class="row"><span class="lbl">Regions tracked</span><span class="val">${[...new Set(fd.attendees.map(a=>a.region).filter(Boolean))].length}</span></div>
+  </div>
+</div>
+
+<div class="footer">DSV Internal · CI & Process Optimization · Americas Network · Data as of ${new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</div>
+
+<script>window.onload=()=>window.print();<\/script>
+</body></html>`;
+
+  const win=window.open("","_blank");
+  if(win){win.document.write(html);win.document.close();}
+  else{alert("Please allow popups to print the report.");}
+
+  const d=document.createElement("div");
+  d.innerHTML=`<div class="page-title" style="margin-bottom:16px">Print Report</div>
+    <div class="panel" style="text-align:center;padding:40px">
+      <div style="font-size:40px;margin-bottom:12px">📄</div>
+      <div style="font-size:15px;font-weight:600;color:#002664;margin-bottom:8px">Report opened in a new tab</div>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:20px">Scope: ${filterDesc}</div>
+      <button onclick="viewReport()" style="padding:10px 24px;background:#002664;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif">Generate Again</button>
+    </div>`;
   return d;
 }
 
