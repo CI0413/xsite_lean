@@ -684,7 +684,6 @@ function buildDateRange(){
   return wrap;
 }
 
-let _searchDebounce=null;
 function buildSearchBar(placeholder, value, onChange){
   const wrap=document.createElement("div");
   wrap.className="search-bar";
@@ -692,20 +691,31 @@ function buildSearchBar(placeholder, value, onChange){
   input.type="text";
   input.placeholder=placeholder;
   input.value=value;
-  input.setAttribute("data-search","1");
+  input.setAttribute("data-search-id", placeholder.slice(0,10));
   input.oninput=e=>{
-    const v=e.target.value;
-    // Update state variable directly without full re-render on each keystroke
-    onChange(v);
-    clearTimeout(_searchDebounce);
-    _searchDebounce=setTimeout(()=>{
-      const activeEl=document.activeElement;
-      const pos=activeEl?activeEl.selectionStart:null;
+    onChange(e.target.value);
+    // Update filtered rows without rebuilding the whole DOM
+    // Just re-render the tbody in place
+    const tbody=document.querySelector(".tbl tbody");
+    if(tbody){
+      // Trigger a lightweight filter update
+      window._searchPending=true;
+      requestAnimationFrame(()=>{
+        if(!window._searchPending)return;
+        window._searchPending=false;
+        const cursorPos=input.selectionStart;
+        const cursorVal=input.value;
+        render();
+        // Restore focus to the search input
+        const newInput=document.querySelector("[data-search-id='"+placeholder.slice(0,10)+"']");
+        if(newInput&&newInput!==document.activeElement){
+          newInput.focus();
+          try{newInput.setSelectionRange(cursorVal.length,cursorVal.length);}catch(e){}
+        }
+      });
+    } else {
       render();
-      // Restore focus and cursor position
-      const newInput=document.querySelector("input[data-search='1']");
-      if(newInput){newInput.focus();if(pos!==null)try{newInput.setSelectionRange(pos,pos);}catch(e){}}
-    },0);
+    }
   };
   const icon=document.createElement("span");
   icon.className="s-icon";icon.textContent="🔍";
