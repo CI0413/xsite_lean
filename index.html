@@ -243,8 +243,8 @@ const NAVY="#002664", ORANGE="#D97706";
 const TIERS=["Lean 1A","Lean 1B","Lean 1C"];
 const TIER_COLOR={"Lean 1A":"#002664","Lean 1B":"#E18735","Lean 1C":"#00682A"};
 const TIER_BG={"Lean 1A":"#dbeafe","Lean 1B":"#fef3c7","Lean 1C":"#dcfce7"};
-const STATUS_COLOR={"No Exam Yet":"#9ca3af","Attended Not Passed":"#f59e0b","Trained":"#002664","Trained":"#00682A"};
-const STATUS_BG={"No Exam Yet":"#f3f4f6","Attended Not Passed":"#fef3c7","Trained":"#dbeafe","Trained":"#dcfce7"};
+const STATUS_COLOR={"No Exam Yet":"#9ca3af","Attended Not Passed":"#f59e0b","Exam Passed":"#1A56B0","Trained":"#00682A"};
+const STATUS_BG={"No Exam Yet":"#f3f4f6","Attended Not Passed":"#fef3c7","Exam Passed":"#dbeafe","Trained":"#dbeafe","Trained":"#dcfce7"};
 const STORAGE_KEY="lean-mgmt-v5";
 
 // ── Logo ─────────────────────────────────────────────────────────
@@ -786,23 +786,23 @@ function buildDonut(counts){
 function getLearnerStatus(fd, tier){
   const d2=data||SAMPLE;
   const allExamRows=d2.allExamRows||[];
+  const rank={"No Exam Yet":0,"Attended Not Passed":1,"Exam Passed":2,"Trained":3};
   let learners=[];
   if(tier==="All"){
     const emailStatus={};
     TIERS.forEach(t=>{
       const ws=fd.workshops.filter(w=>w.tier===t);
       const wsIds=new Set(ws.map(w=>w.id));
-      const att=fd.attendees.filter(a=>wsIds.has(a.workshopId));
+      const att=fd.attendees.filter(a=>!a.workshopId||wsIds.has(a.workshopId));
       att.forEach(a=>{
         const bestExam=fd.exams.find(x=>x.email===a.email&&x.tier===t);
-        const approved=bestExam?.passed&&fd.projects.find(p=>p.email===a.email&&p.tier===t&&isApproved(p));
+        const approved=bestExam?.passed&&(fd.projects.find(p=>p.email===a.email&&p.tier===t&&isApproved(p))||isProjectWaived(a.email,t));
         const hasFailed=allExamRows.some(r=>r.email===a.email&&r.tier===t&&!r.passed);
         let st;
         if(approved) st="Trained";
-        else if(bestExam?.passed) st="Trained";
+        else if(bestExam?.passed) st="Exam Passed";
         else if(hasFailed) st="Attended Not Passed";
         else st="No Exam Yet";
-        const rank={"No Exam Yet":0,"Attended Not Passed":1,"Trained":2,"Trained":3};
         if(!emailStatus[a.email]||rank[st]>rank[emailStatus[a.email]])emailStatus[a.email]=st;
       });
     });
@@ -810,23 +810,23 @@ function getLearnerStatus(fd, tier){
   } else {
     const ws=fd.workshops.filter(w=>w.tier===tier);
     const wsIds=new Set(ws.map(w=>w.id));
-    const att=fd.attendees.filter(a=>wsIds.has(a.workshopId));
+    const att=fd.attendees.filter(a=>!a.workshopId||wsIds.has(a.workshopId));
     const seen=new Set();
     att.forEach(a=>{
       if(seen.has(a.email))return; seen.add(a.email);
       const bestExam=fd.exams.find(x=>x.email===a.email&&x.tier===tier);
-      const approved=bestExam?.passed&&fd.projects.find(p=>p.email===a.email&&p.tier===tier&&isApproved(p));
+      const approved=bestExam?.passed&&(fd.projects.find(p=>p.email===a.email&&p.tier===tier&&isApproved(p))||isProjectWaived(a.email,tier));
       const hasFailed=allExamRows.some(r=>r.email===a.email&&r.tier===tier&&!r.passed);
       let st;
       if(approved) st="Trained";
-      else if(bestExam?.passed) st="Trained";
+      else if(bestExam?.passed) st="Exam Passed";
       else if(hasFailed) st="Attended Not Passed";
       else st="No Exam Yet";
       learners.push({status:st});
     });
   }
   const total=learners.length||1;
-  return ["No Exam Yet","Attended Not Passed","Trained","Trained"].map(s=>({
+  return ["No Exam Yet","Attended Not Passed","Exam Passed","Trained"].map(s=>({
     label:s,value:learners.filter(l=>l.status===s).length,color:STATUS_COLOR[s],
   }));
 }
@@ -1163,8 +1163,8 @@ function viewExecutive(){
       </div>
       <table class="tbl">
         <thead><tr>
-          <th>Tier</th><th class="center">Attendees</th><th class="center">Trained</th>
-          <th>Trained %</th><th class="center">Trained</th><th class="center">Projects</th><th class="center">Savings</th>
+          <th>Tier</th><th class="center">Attendees</th><th class="center">Exam Passed</th>
+          <th>Exam Passed %</th><th class="center">Trained</th><th class="center">Projects</th><th class="center">Savings</th>
         </tr></thead>
         <tbody>${tierRows}</tbody>
       </table>
@@ -2791,13 +2791,13 @@ function viewReport(){
 <div class="kpi-grid">
   <div class="kpi"><div class="kpi-label">Workshops held</div><div class="kpi-val">${totalW}</div></div>
   <div class="kpi orange"><div class="kpi-label">Unique learners</div><div class="kpi-val">${totalL}</div></div>
-  <div class="kpi orange"><div class="kpi-label">Trained</div><div class="kpi-val">${trained}</div><div class="kpi-sub">${trainedPct}% of learners</div></div>
+  <div class="kpi orange"><div class="kpi-label">Exam Passed</div><div class="kpi-val">${trained}</div><div class="kpi-sub">${trainedPct}% of learners</div></div>
   <div class="kpi green"><div class="kpi-label">Trained</div><div class="kpi-val">${certified}</div><div class="kpi-sub">${certPct}% of learners</div></div>
 </div>
 
 <div class="panel">
   <div class="panel-title">Training by tier</div>
-  <div class="tier-grid tier-hdr"><span>Tier</span><span>Progress</span><span style="text-align:center">Attended</span><span style="text-align:center">Trained</span><span style="text-align:center">Certified</span></div>
+  <div class="tier-grid tier-hdr"><span>Tier</span><span>Progress (Exam Passed %)</span><span style="text-align:center">Attended</span><span style="text-align:center">Exam Passed</span><span style="text-align:center">Trained</span></div>
   ${tierData.map(t=>`<div class="tier-grid">
     <span style="font-size:10px;font-weight:700;color:${TIER_COLOR[t.tier]||'#002664'}">${t.tier}</span>
     <div class="bar-bg"><div class="bar-fill" style="width:${t.pct}%;background:${TIER_COLOR[t.tier]||'#002664'}"></div></div>
