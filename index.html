@@ -258,6 +258,7 @@ let globalFilters = {region:"All",country:"All",site:"All",customer:"All",traine
 let dateFrom = "";
 let dateTo = "";
 let learnerSearch = "";
+let learnerStatusFilter = "All";
 let workshopSearch = "";
 let workshopSortDir = "desc"; // desc = newest first
 let execTierFilter = {trained:"All", certified:"All", trainerCert:"All"};
@@ -1256,7 +1257,7 @@ function viewLearners(){
     const exams=fd.exams.filter(x=>x.email===l.email);
     const passed=exams.filter(x=>x.passed);
     const approved=fd.projects.filter(p=>p.email===l.email&&isApproved(p)&&fd.exams.find(x=>x.email===l.email&&x.tier===p.tier&&x.passed));
-    const manualCertTiers=TIERS.filter(t=>isManualCertified(l.email,t));
+    const manualCertTiers=TIERS.filter(t=>isProjectWaived(l.email,t)&&fd.exams.find(x=>x.email===l.email&&x.tier===t&&x.passed));
     const attendedAtts=fd.attendees.filter(a=>a.email===l.email);
     const attendedWsIds=[...new Set(attendedAtts.map(a=>a.workshopId).filter(Boolean))];
     const trainerSet=new Set();
@@ -1288,12 +1289,26 @@ function viewLearners(){
     ? learners.filter(l=>!isOps(l.learnerType))
     : learners;
 
+  // Apply status filter
+  const statusFilteredLearners = learnerStatusFilter==="All" ? opsFilteredLearners :
+    opsFilteredLearners.filter(l=>{
+      const hasExam=fd.exams.some(x=>x.email===l.email);
+      const hasPassed=l.tiersTrained&&l.tiersTrained.length>0;
+      const hasTrained=l.tiersApproved&&l.tiersApproved.length>0;
+      const hasFailed=fd.allExamRows&&fd.allExamRows.some(x=>x.email===l.email&&!x.passed)&&!hasPassed;
+      if(learnerStatusFilter==="Trained")return hasTrained;
+      if(learnerStatusFilter==="Exam Passed")return hasPassed&&!hasTrained;
+      if(learnerStatusFilter==="Attended Not Passed")return hasFailed;
+      if(learnerStatusFilter==="No Exam Yet")return!hasExam;
+      return true;
+    });
+
   const filteredLearners=learnerSearch
-    ? opsFilteredLearners.filter(l=>{
+    ? statusFilteredLearners.filter(l=>{
         const q=learnerSearch.toLowerCase();
         return [l.name,l.email,l.site,l.customer,l.region,l.country,...l.trainers].some(v=>v&&v.toLowerCase().includes(q));
       })
-    : opsFilteredLearners;
+    : statusFilteredLearners;
 
   const d=document.createElement("div");
   const exportBtn=document.createElement("button");
@@ -1303,10 +1318,15 @@ function viewLearners(){
   // Non-ops filter
   if(!window.learnerOpsFilter)window.learnerOpsFilter="All";
   const opsToggle=document.createElement("div");
-  opsToggle.style.cssText="display:flex;align-items:center;gap:8px;margin-bottom:12px;";
-  opsToggle.innerHTML=`<span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Show:</span>
+  opsToggle.style.cssText="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;row-gap:8px;";
+  opsToggle.innerHTML=`
+    <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Show:</span>
     ${["All","Ops","Non-Ops"].map(o=>`<button onclick="window.learnerOpsFilter='${o}';render();"
-      style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${window.learnerOpsFilter===o?"#002664":"#d1d5db"};background:${window.learnerOpsFilter===o?"#002664":"#fff"};color:${window.learnerOpsFilter===o?"#fff":"#6b7280"}">${o}</button>`).join("")}`;
+      style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${window.learnerOpsFilter===o?"#002664":"#d1d5db"};background:${window.learnerOpsFilter===o?"#002664":"#fff"};color:${window.learnerOpsFilter===o?"#fff":"#6b7280"}">${o}</button>`).join("")}
+    <span style="width:1px;height:16px;background:#e5e7eb;display:inline-block;margin:0 4px"></span>
+    <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Status:</span>
+    ${["All","No Exam Yet","Attended Not Passed","Exam Passed","Trained"].map(s=>`<button onclick="learnerStatusFilter='${s}';render();"
+      style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${learnerStatusFilter===s?"#002664":"#d1d5db"};background:${learnerStatusFilter===s?"#002664":"#fff"};color:${learnerStatusFilter===s?"#fff":"#6b7280"}">${s}</button>`).join("")}`;
 
   d.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div class="page-title">Learners <span style="font-size:14px;color:#9ca3af;font-weight:400">${filteredLearners.length}${learnerSearch?" of "+learners.length:""} records</span></div></div>`;
   d.querySelector("div").appendChild(exportBtn);
@@ -1317,7 +1337,7 @@ function viewLearners(){
   const panel=document.createElement("div");panel.className="panel";
   panel.innerHTML=`<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>
     <th>Name</th><th>Email / ID</th><th>Site</th><th>Customer</th><th>Region</th><th>Country</th>
-    <th>Trainer(s)</th><th>Trained</th><th class="center">Project</th><th>Trained</th>
+    <th>Trainer(s)</th><th>Exam Passed</th><th class="center">Project</th><th>Trained</th>
   </tr></thead><tbody>${
     filteredLearners.map((l,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
       <td style="font-weight:600;white-space:nowrap;cursor:pointer;color:#002664;text-decoration:underline;text-underline-offset:2px" onclick="showLearnerProfile('${l.email}')">${l.name}${!isOps(l.learnerType)?'<span style="margin-left:6px;background:#f3f4f6;color:#6b7280;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;vertical-align:middle">Non-Ops</span>':''}</td>
