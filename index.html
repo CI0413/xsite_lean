@@ -243,8 +243,8 @@ const NAVY="#002664", ORANGE="#D97706";
 const TIERS=["Lean 1A","Lean 1B","Lean 1C"];
 const TIER_COLOR={"Lean 1A":"#002664","Lean 1B":"#E18735","Lean 1C":"#00682A"};
 const TIER_BG={"Lean 1A":"#dbeafe","Lean 1B":"#fef3c7","Lean 1C":"#dcfce7"};
-const STATUS_COLOR={"No Exam Yet":"#9ca3af","Attended Not Passed":"#f59e0b","Trained":"#002664","Certified":"#00682A"};
-const STATUS_BG={"No Exam Yet":"#f3f4f6","Attended Not Passed":"#fef3c7","Trained":"#dbeafe","Certified":"#dcfce7"};
+const STATUS_COLOR={"No Exam Yet":"#9ca3af","Attended Not Passed":"#f59e0b","Trained":"#002664","Trained":"#00682A"};
+const STATUS_BG={"No Exam Yet":"#f3f4f6","Attended Not Passed":"#fef3c7","Trained":"#dbeafe","Trained":"#dcfce7"};
 const STORAGE_KEY="lean-mgmt-v5";
 
 // ── Logo ─────────────────────────────────────────────────────────
@@ -280,12 +280,12 @@ const isApproved = p => {const v=norm(p.approved).toLowerCase();return v==="yes"
 // Returns true if learner should count in ops KPIs
 // Non-ops: type field contains "non-ops", "non ops", "management", "support", "admin", "salary" etc
 function trainerStatus(trainer, tier){
-  // Returns "Certified", "In Progress", or "Not Qualified"
+  // Returns "Trained", "In Progress", or "Not Qualified"
   const t=tier.toLowerCase().replace("lean ","").replace(" ","");
   const qualified=trainer["q"+t];
   const dateCert=trainer["date"+t];
   if(!qualified)return"Not Qualified";
-  if(dateCert)return"Certified";
+  if(dateCert)return"Trained";
   return"In Progress";
 }
 
@@ -797,11 +797,11 @@ function getLearnerStatus(fd, tier){
         const approved=bestExam?.passed&&fd.projects.find(p=>p.email===a.email&&p.tier===t&&isApproved(p));
         const hasFailed=allExamRows.some(r=>r.email===a.email&&r.tier===t&&!r.passed);
         let st;
-        if(approved) st="Certified";
+        if(approved) st="Trained";
         else if(bestExam?.passed) st="Trained";
         else if(hasFailed) st="Attended Not Passed";
         else st="No Exam Yet";
-        const rank={"No Exam Yet":0,"Attended Not Passed":1,"Trained":2,"Certified":3};
+        const rank={"No Exam Yet":0,"Attended Not Passed":1,"Trained":2,"Trained":3};
         if(!emailStatus[a.email]||rank[st]>rank[emailStatus[a.email]])emailStatus[a.email]=st;
       });
     });
@@ -817,7 +817,7 @@ function getLearnerStatus(fd, tier){
       const approved=bestExam?.passed&&fd.projects.find(p=>p.email===a.email&&p.tier===tier&&isApproved(p));
       const hasFailed=allExamRows.some(r=>r.email===a.email&&r.tier===tier&&!r.passed);
       let st;
-      if(approved) st="Certified";
+      if(approved) st="Trained";
       else if(bestExam?.passed) st="Trained";
       else if(hasFailed) st="Attended Not Passed";
       else st="No Exam Yet";
@@ -825,7 +825,7 @@ function getLearnerStatus(fd, tier){
     });
   }
   const total=learners.length||1;
-  return ["No Exam Yet","Attended Not Passed","Trained","Certified"].map(s=>({
+  return ["No Exam Yet","Attended Not Passed","Trained","Trained"].map(s=>({
     label:s,value:learners.filter(l=>l.status===s).length,color:STATUS_COLOR[s],
   }));
 }
@@ -1008,7 +1008,38 @@ function parseExcelFile(wb){
     Object.entries(row.qTextMap).forEach(([k,v])=>{if(v&&!questionLabels[t][k])questionLabels[t][k]=v;});
   });
 
-  const projects=projRaw.map(r=>{const k=Object.keys(r);return{email:normLow(r[findCol(k,"email","email / id","email/id")||""]||""),tier:norm(r[findCol(k,"tier")||""]),submitted:xlSerialToDate(r[findCol(k,"date submitted","submitted","date submitted *")||""]),approved:norm(r[findCol(k,"approved")||""]),savings:parseFloat((r[findCol(k,"savings ($)","savings","cost savings","saving")||""]||"").toString().replace(/[$,()]/g,""))||0};}).filter(p=>p.email);
+  const projects=[];
+  projRaw.forEach(r=>{
+    const k=Object.keys(r);
+    const email=normLow(r[findCol(k,"email","email / id","email/id")||""]||"");
+    const tier=norm(r[findCol(k,"tier")||""]);
+    const submitted=xlSerialToDate(r[findCol(k,"date submitted","submitted","date submitted *")||""]);
+    const approved=norm(r[findCol(k,"approved")||""]);
+    const rawSavings=parseFloat((r[findCol(k,"savings ($)","savings","cost savings","saving")||""]||"").toString().replace(/[$,()]/g,""))||0;
+    const projType=norm(r[findCol(k,"project type","type")||""]||"CI Project");
+    const groupRaw=norm(r[findCol(k,"group members","members","additional learners")||""]||"");
+    // Parse group members
+    const groupMembers=groupRaw?groupRaw.split(",").map(s=>normLow(s.trim())).filter(Boolean):[];
+    const allMembers=email?[email,...groupMembers.filter(m=>m!==email)]:[...groupMembers];
+    const memberCount=allMembers.length||1;
+    // Split savings among members for group projects
+    const memberSavings=projType==="Group Project"?Math.round(rawSavings/memberCount):rawSavings;
+    // Create a project record for each member
+    allMembers.forEach((mem,i)=>{
+      if(!mem)return;
+      projects.push({
+        email:mem,
+        tier,submitted,approved,
+        savings:memberSavings,
+        projectType:projType,
+        isGroupProject:projType==="Group Project",
+        groupSize:memberCount,
+        primaryEmail:email, // original submitter
+      });
+    });
+    // If no email at all, skip
+    if(!email&&!groupMembers.length)return;
+  });
 
   const trainers=trRaw.map(r=>{const k=Object.keys(r);const yn=key=>{const v=norm(r[findCol(k,key)||""]).toLowerCase();return v==="yes"||v==="true";};return{name:norm(r[findCol(k,"name","trainer name","full name")||""]),email:normLow(r[findCol(k,"email","email / id","email/id")||""]||""),site:norm(r[findCol(k,"site","location")||""]||""),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),customer:norm(r[findCol(k,"customer")||""]),q1a:yn("qualified 1a"),q1b:yn("qualified 1b"),q1c:yn("qualified 1c"),date1a:xlSerialToDate(r[findCol(k,"date certified 1a","date 1a")||""]),date1b:xlSerialToDate(r[findCol(k,"date certified 1b","date 1b")||""]),date1c:xlSerialToDate(r[findCol(k,"date certified 1c","date 1c")||""]),lead1a:norm(r[findCol(k,"lead trainer 1a","lead 1a")||""]||""),lead1b:norm(r[findCol(k,"lead trainer 1b","lead 1b")||""]||""),lead1c:norm(r[findCol(k,"lead trainer 1c","lead 1c")||""]||"")};}).filter(t=>t.name);
 
@@ -1039,7 +1070,17 @@ function viewExecutive(){
   const trainedEmailTiersExec=new Set(fd.exams.filter(x=>x.passed&&(execTierFilter.certified==="All"||x.tier===execTierFilter.certified)).map(x=>x.email+"||"+x.tier));
   const certified=new Set(fd.projects.filter(p=>isApproved(p)&&trainedEmailTiersExec.has(p.email+"||"+p.tier)).map(p=>p.email)).size;
   const approvedProjects=fd.projects.filter(isApproved);
-  const totalSavings=approvedProjects.reduce((s,p)=>s+p.savings,0);
+  // Count unique projects — group projects share a primaryEmail, count once
+  const uniqueApproved=(()=>{
+    const seen=new Set();
+    return approvedProjects.filter(p=>{
+      const key=(p.primaryEmail||p.email)+"||"+(p.tier||"");
+      if(seen.has(key))return false;
+      seen.add(key);
+      return true;
+    });
+  })();
+  const totalSavings=uniqueApproved.reduce((s,p)=>s+p.savings*(p.groupSize||1),0);
 
   const tierRows=TIERS.map(tier=>{
     const ws=fd.workshops.filter(w=>w.tier===tier);
@@ -1083,7 +1124,7 @@ function viewExecutive(){
         <div class="kpi-value" style="color:#002664">${totalL}</div>
       </div>
       <div class="kpi-card" style="border-top-color:#E18635">
-        <div class="kpi-header"><div class="kpi-label">Total Trained</div>
+        <div class="kpi-header"><div class="kpi-label">Exam Passed</div>
           <select onchange="execTierFilter.trained=this.value;render();" onclick="event.stopPropagation()"
             style="font-size:10px;border:1px solid #d1d5db;border-radius:5px;padding:2px 4px;background:#fff;color:#002664;font-family:Arial,sans-serif;cursor:pointer">
             <option value="All"${execTierFilter.trained==="All"?" selected":""}>All</option>
@@ -1094,7 +1135,7 @@ function viewExecutive(){
         <div class="kpi-sub">${pct(trained,totalL)}% of attendees${execTierFilter.trained!=="All"?" · "+execTierFilter.trained:" · unique, any tier"}</div>
       </div>
       <div class="kpi-card" style="border-top-color:#00682A">
-        <div class="kpi-header"><div class="kpi-label">Certified</div>
+        <div class="kpi-header"><div class="kpi-label">Trained</div>
           <select onchange="execTierFilter.certified=this.value;render();" onclick="event.stopPropagation()"
             style="font-size:10px;border:1px solid #d1d5db;border-radius:5px;padding:2px 4px;background:#fff;color:#00682A;font-family:Arial,sans-serif;cursor:pointer">
             <option value="All"${execTierFilter.certified==="All"?" selected":""}>All</option>
@@ -1122,7 +1163,7 @@ function viewExecutive(){
       <table class="tbl">
         <thead><tr>
           <th>Tier</th><th class="center">Attendees</th><th class="center">Trained</th>
-          <th>Trained %</th><th class="center">Certified</th><th class="center">Projects</th><th class="center">Savings</th>
+          <th>Trained %</th><th class="center">Trained</th><th class="center">Projects</th><th class="center">Savings</th>
         </tr></thead>
         <tbody>${tierRows}</tbody>
       </table>
@@ -1276,7 +1317,7 @@ function viewLearners(){
   const panel=document.createElement("div");panel.className="panel";
   panel.innerHTML=`<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>
     <th>Name</th><th>Email / ID</th><th>Site</th><th>Customer</th><th>Region</th><th>Country</th>
-    <th>Trainer(s)</th><th>Trained</th><th class="center">Project</th><th>Certified</th>
+    <th>Trainer(s)</th><th>Trained</th><th class="center">Project</th><th>Trained</th>
   </tr></thead><tbody>${
     filteredLearners.map((l,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
       <td style="font-weight:600;white-space:nowrap;cursor:pointer;color:#002664;text-decoration:underline;text-underline-offset:2px" onclick="showLearnerProfile('${l.email}')">${l.name}${!isOps(l.learnerType)?'<span style="margin-left:6px;background:#f3f4f6;color:#6b7280;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;vertical-align:middle">Non-Ops</span>':''}</td>
@@ -1362,7 +1403,7 @@ function viewTrainers(){
     </div>
     <div class="kpi-card" style="border-top-color:#00682A">
       <div class="kpi-header"><div class="kpi-label">Certified Trainers</div>${tierSelect('certified',globalFilters.tier)}</div>
-      <div class="kpi-value" style="color:#00682A">${trainerCountForTier("Certified")}</div>
+      <div class="kpi-value" style="color:#00682A">${trainerCountForTier("Trained")}</div>
       <div class="kpi-sub">fully certified</div>
     </div>
   `;
@@ -1444,8 +1485,8 @@ window.showLearnerProfile = function(email){
     const approvedProj = proj.find(p=>isApproved(p)&&exam?.passed);
     const hasFailed = attempts.some(r=>!r.passed);
     let status;
-    if(approvedProj) status="Certified";
-    else if(exam?.passed) status="Trained";
+    if(approvedProj) status="Trained";
+    else if(exam?.passed) status="Exam Passed";
     else if(hasFailed) status="Attended Not Passed";
     else if(ws.length) status="No Exam Yet";
     else status=null;
@@ -1600,7 +1641,7 @@ function viewProjects(){
         <div class="kpi-header"><div class="kpi-label">Certified Trainers</div>
           <div class="kpi-icon">🎓</div>
         </div>
-        <div class="kpi-value" style="color:#00682A">${fd.trainers.filter(t=>globalFilters.tier==="All"?TIERS.some(ti=>trainerStatus(t,ti)==="Certified"):trainerStatus(t,globalFilters.tier)==="Certified").length}</div>
+        <div class="kpi-value" style="color:#00682A">${fd.trainers.filter(t=>globalFilters.tier==="All"?TIERS.some(ti=>trainerStatus(t,ti)==="Trained"):trainerStatus(t,globalFilters.tier)==="Trained").length}</div>
         <div class="kpi-sub">${globalFilters.tier==="All"?"across all tiers":globalFilters.tier}</div>
       </div>
   `;
@@ -1683,7 +1724,7 @@ function viewByTier(){
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Workshops</div><div class="kpi-value" style="color:#002664">${ws.length}</div></div>
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Attended</div><div class="kpi-value" style="color:#002664">${enrolled}</div></div>
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Trained</div><div class="kpi-value" style="color:#002664">${trained}</div><div class="kpi-sub">${tp}% of enrolled</div></div>
-    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Certified</div><div class="kpi-value" style="color:#002664">${certified}</div><div class="kpi-sub">${cp}% of enrolled</div></div>
+    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Trained</div><div class="kpi-value" style="color:#002664">${certified}</div><div class="kpi-sub">${cp}% of enrolled</div></div>
   `;
   d.appendChild(kpis);
 
@@ -1713,7 +1754,7 @@ function viewByTier(){
 
   if(regionRows.length){
     const rp=document.createElement("div");rp.className="panel";
-    rp.innerHTML=`<div class="panel-title">Breakdown by Region</div><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Region</th><th class="center">Attended</th><th class="center">Trained</th><th>Trained %</th><th class="center">Certified</th><th>Certified %</th></tr></thead><tbody>${
+    rp.innerHTML=`<div class="panel-title">Breakdown by Region</div><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Region</th><th class="center">Attended</th><th class="center">Trained</th><th>Trained %</th><th class="center">Trained</th><th>Certified %</th></tr></thead><tbody>${
       regionRows.map((r,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
         <td style="font-weight:600">${r.region}</td>
         <td class="center">${r.enrolled}</td>
@@ -1735,13 +1776,13 @@ function viewByTier(){
     const approved=exam?.passed&&fd.projects.find(p=>p.email===a.email&&p.tier===tier&&isApproved(p));
     const hasFailed=allER.some(r=>r.email===a.email&&r.tier===tier&&!r.passed);
     let st;
-    if(approved)st="Certified";
+    if(approved)st="Trained";
     else if(exam?.passed)st="Trained";
     else if(hasFailed)st="Attended Not Passed";
     else st="No Exam Yet";
     return{...a,score:exam?.score??null,status:st};
   });
-  const statusOrder={"Certified":0,"Trained":1,"Attended Not Passed":2,"No Exam Yet":3};
+  const statusOrder={"Trained":0,"Exam Passed":1,"Attended Not Passed":2,"No Exam Yet":3};
   learners.sort((a,b)=>statusOrder[a.status]-statusOrder[b.status]||a.name.localeCompare(b.name));
   if(!window._tierLearners)window._tierLearners={};
   window._tierLearners[tier]=learners;
@@ -1756,7 +1797,7 @@ function viewByTier(){
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Status:</span>
-          ${["All","No Exam Yet","Attended Not Passed","Trained","Certified"].map(s=>`
+          ${["All","No Exam Yet","Attended Not Passed","Exam Passed","Trained"].map(s=>`
             <button onclick="tierStatusFilter='${s}';render();"
               style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${tierStatusFilter===s?"#002664":"#d1d5db"};background:${tierStatusFilter===s?"#002664":"#fff"};color:${tierStatusFilter===s?"#fff":"#6b7280"}">${s}</button>`).join("")}
         </div>
@@ -2642,7 +2683,7 @@ function viewReport(){
   const topCust=topCustEntries[0]||["—",0];
 
   // Trainers
-  const certTrainers=fd.trainers.filter(t=>TIERS.some(ti=>trainerStatus(t,ti)==="Certified")).length;
+  const certTrainers=fd.trainers.filter(t=>TIERS.some(ti=>trainerStatus(t,ti)==="Trained")).length;
   const inProgTrainers=fd.trainers.filter(t=>TIERS.some(ti=>trainerStatus(t,ti)==="In Progress")).length;
 
   // Filter description
@@ -2731,7 +2772,7 @@ function viewReport(){
   <div class="kpi"><div class="kpi-label">Workshops held</div><div class="kpi-val">${totalW}</div></div>
   <div class="kpi orange"><div class="kpi-label">Unique learners</div><div class="kpi-val">${totalL}</div></div>
   <div class="kpi orange"><div class="kpi-label">Trained</div><div class="kpi-val">${trained}</div><div class="kpi-sub">${trainedPct}% of learners</div></div>
-  <div class="kpi green"><div class="kpi-label">Certified</div><div class="kpi-val">${certified}</div><div class="kpi-sub">${certPct}% of learners</div></div>
+  <div class="kpi green"><div class="kpi-label">Trained</div><div class="kpi-val">${certified}</div><div class="kpi-sub">${certPct}% of learners</div></div>
 </div>
 
 <div class="panel">
