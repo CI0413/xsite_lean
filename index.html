@@ -1743,8 +1743,8 @@ function viewByTier(){
   kpis.innerHTML=`
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Workshops</div><div class="kpi-value" style="color:#002664">${ws.length}</div></div>
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Attended</div><div class="kpi-value" style="color:#002664">${enrolled}</div></div>
-    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Trained</div><div class="kpi-value" style="color:#002664">${trained}</div><div class="kpi-sub">${tp}% of enrolled</div></div>
-    <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-label">Trained</div><div class="kpi-value" style="color:#002664">${certified}</div><div class="kpi-sub">${cp}% of enrolled</div></div>
+    <div class="kpi-card" style="border-top-color:#1A56B0"><div class="kpi-label">Exam Passed</div><div class="kpi-value" style="color:#1A56B0">${trained}</div><div class="kpi-sub">${tp}% of attended</div></div>
+    <div class="kpi-card" style="border-top-color:#00682A"><div class="kpi-label">Trained</div><div class="kpi-value" style="color:#00682A">${certified}</div><div class="kpi-sub">${cp}% of attended</div></div>
   `;
   d.appendChild(kpis);
 
