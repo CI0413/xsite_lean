@@ -1731,11 +1731,11 @@ function viewByTier(){
   const progPanel=document.createElement("div");progPanel.className="panel";
   progPanel.innerHTML=`
     <div style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;font-weight:500;margin-bottom:6px"><span>Trained (${trained}/${enrolled})</span><span style="color:${color};font-weight:700">${tp}%</span></div>
+      <div style="display:flex;justify-content:space-between;font-weight:500;margin-bottom:6px"><span>Exam Passed (${trained}/${enrolled})</span><span style="color:${color};font-weight:700">${tp}%</span></div>
       <div class="pbar" style="height:12px"><div class="fill" style="width:${tp}%;background:${color}"></div></div>
     </div>
     <div>
-      <div style="display:flex;justify-content:space-between;font-weight:500;margin-bottom:6px"><span>Certified (${certified}/${enrolled})</span><span style="color:#065f46;font-weight:700">${cp}%</span></div>
+      <div style="display:flex;justify-content:space-between;font-weight:500;margin-bottom:6px"><span>Trained (${certified}/${enrolled})</span><span style="color:#065f46;font-weight:700">${cp}%</span></div>
       <div class="pbar" style="height:12px"><div class="fill" style="width:${cp}%;background:#065f46"></div></div>
     </div>
   `;
@@ -1748,13 +1748,13 @@ function viewByTier(){
     if(!regionMap[r])regionMap[r]={r,enrolled:new Set(),trained:new Set(),certified:new Set()};
     regionMap[r].enrolled.add(a.email);
     if(fd.exams.find(x=>x.email===a.email&&x.tier===tier&&x.passed))regionMap[r].trained.add(a.email);
-    if((fd.exams.find(x=>x.email===a.email&&x.tier===tier&&x.passed)||isManualCertified(a.email,tier))&&fd.projects.find(p=>p.email===a.email&&p.tier===tier&&isApproved(p)))regionMap[r].certified.add(a.email);
+    if((fd.exams.find(x=>x.email===a.email&&x.tier===tier&&x.passed)||isProjectWaived(a.email,tier))&&fd.projects.find(p=>p.email===a.email&&p.tier===tier&&isApproved(p)))regionMap[r].certified.add(a.email);
   });
   const regionRows=Object.values(regionMap).map(rm=>({region:rm.r,enrolled:rm.enrolled.size,trained:rm.trained.size,certified:rm.certified.size,tp:pct(rm.trained.size,rm.enrolled.size),cp:pct(rm.certified.size,rm.enrolled.size)})).sort((a,b)=>b.enrolled-a.enrolled);
 
   if(regionRows.length){
     const rp=document.createElement("div");rp.className="panel";
-    rp.innerHTML=`<div class="panel-title">Breakdown by Region</div><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Region</th><th class="center">Attended</th><th class="center">Trained</th><th>Trained %</th><th class="center">Trained</th><th>Certified %</th></tr></thead><tbody>${
+    rp.innerHTML=`<div class="panel-title">Breakdown by Region</div><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Region</th><th class="center">Attended</th><th class="center">Exam Passed</th><th>Exam Passed %</th><th class="center">Trained</th><th>Trained %</th></tr></thead><tbody>${
       regionRows.map((r,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
         <td style="font-weight:600">${r.region}</td>
         <td class="center">${r.enrolled}</td>
@@ -1777,7 +1777,7 @@ function viewByTier(){
     const hasFailed=allER.some(r=>r.email===a.email&&r.tier===tier&&!r.passed);
     let st;
     if(approved)st="Trained";
-    else if(exam?.passed)st="Trained";
+    else if(exam?.passed)st="Exam Passed";
     else if(hasFailed)st="Attended Not Passed";
     else st="No Exam Yet";
     return{...a,score:exam?.score??null,status:st};
@@ -3007,24 +3007,41 @@ function exportTierLearners(tier, learners){
 
 function exportLearners(learners){
   const d2=data||SAMPLE;
-  const rows=learners.map(l=>({
-    "Name":l.name,
-    "Email/ID":l.email&&l.email.endsWith("@internal")?"(auto)":l.email||"",
-    "Site":l.site||"",
-    "Customer":l.customer||"",
-    "Region":l.region||"",
-    "Country":l.country||"",
-    "Workshops":l.wCount,
-    "Trainer(s)":l.trainers.join(", "),
-    "Trained Tiers":l.tiersTrained.join(", "),
-    "Exam Scores":TIERS.filter(t=>l.bestScores[t]!==undefined).map(t=>t.replace("Lean ","")+":"+l.bestScores[t]).join(" | "),
-    "Certified Tiers":l.tiersApproved.join(", "),
-    "Project Status":TIERS.map(t=>{
-      const p=l.projectsByTier&&l.projectsByTier[t];
-      if(!p||!p.submitted)return"";
-      return t.replace("Lean ","")+":"+(p.approved?"Approved":"Pending");
-    }).filter(Boolean).join(" | "),
-  }));
+  const rows=learners.map(l=>{
+    // Build per-tier status
+    const tierStatus=TIERS.map(t=>{
+      const exam=fd?fd.exams.find(x=>x.email===l.email&&x.tier===t):null;
+      const proj=l.projectsByTier&&l.projectsByTier[t];
+      const waived=isProjectWaived(l.email,t);
+      const passed=exam&&exam.passed;
+      const approved=proj&&proj.approved;
+      if((approved||waived)&&passed)return t.replace("Lean ","")+": Trained";
+      if(passed)return t.replace("Lean ","")+": Exam Passed";
+      if(l.bestScores&&l.bestScores[t]!==undefined)return t.replace("Lean ","")+": Attended Not Passed";
+      return"";
+    }).filter(Boolean).join(" | ");
+
+    return{
+      "Name":l.name||"",
+      "Email / ID":l.email&&l.email.endsWith("@internal")?"(auto)":l.email||"",
+      "Site":l.site||"",
+      "Customer":l.customer||"",
+      "Region":l.region||"",
+      "Country":l.country||"",
+      "Learner Type":l.learnerType||"Ops",
+      "Trainer(s)":(l.trainers||[]).join(", "),
+      "Tier Status":tierStatus||"Attended — No Exam",
+      "Exam Passed Tiers":(l.tiersTrained||[]).join(", "),
+      "Trained Tiers":(l.tiersApproved||[]).join(", "),
+      "Exam Scores":TIERS.filter(t=>l.bestScores&&l.bestScores[t]!==undefined).map(t=>t.replace("Lean ","")+": "+l.bestScores[t]+"/20").join(" | ")||"",
+      "Projects":TIERS.map(t=>{
+        const p=l.projectsByTier&&l.projectsByTier[t];
+        if(!p||!p.submitted)return"";
+        const waived=isProjectWaived(l.email,t);
+        return t.replace("Lean ","")+": "+(waived?"Waived":p.approved?"Approved":"Pending");
+      }).filter(Boolean).join(" | ")||"None submitted",
+    };
+  });
   exportToExcel("DSV_Learners_"+new Date().toISOString().slice(0,10)+".xlsx",[{name:"Learners",data:rows}]);
 }
 
