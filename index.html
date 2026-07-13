@@ -1071,8 +1071,13 @@ function viewExecutive(){
   const totalL=fd.opsEmails.size;
   const trainedFiltered=fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&(execTierFilter.trained==="All"||x.tier===execTierFilter.trained));
   const trained=new Set(trainedFiltered.map(x=>x.email)).size;
-  const trainedEmailTiersExec=new Set(fd.exams.filter(x=>x.passed&&(execTierFilter.certified==="All"||x.tier===execTierFilter.certified)).map(x=>x.email+"||"+x.tier));
-  const certified=new Set(fd.projects.filter(p=>isApproved(p)&&trainedEmailTiersExec.has(p.email+"||"+p.tier)).map(p=>p.email)).size;
+  const trainedEmailTiersExec=new Set(fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&(execTierFilter.certified==="All"||x.tier===execTierFilter.certified)).map(x=>x.email+"||"+x.tier));
+  // Certified = passed exam + approved project OR passed exam + project waived
+  const certifiedEmails=new Set([
+    ...fd.projects.filter(p=>isApproved(p)&&trainedEmailTiersExec.has(p.email+"||"+p.tier)&&fd.opsEmails.has(p.email)).map(p=>p.email),
+    ...fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&isProjectWaived(x.email,x.tier)&&(execTierFilter.certified==="All"||x.tier===execTierFilter.certified)).map(x=>x.email),
+  ]);
+  const certified=certifiedEmails.size;
   const approvedProjects=fd.projects.filter(isApproved);
   // Count unique projects — group projects share a primaryEmail, count once
   const uniqueApproved=(()=>{
