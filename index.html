@@ -558,6 +558,9 @@ function saveData(d){
       return rest;
     }),
     certNums:d.certNums||{},
+    projectWaivers:d.projectWaivers||{},
+    certOverrides:d.certOverrides||{},
+    questionLabels:d.questionLabels||{},
     _internalIdCounter:d._internalIdCounter||1000,
     firstPassRate:d.firstPassRate||0,
     avgScore:d.avgScore||0,
@@ -1353,12 +1356,18 @@ function viewLearners(){
       }</td>
       <td>${l.tiersTrained.map(t=>`<span class="badge" style="background:${TIER_BG[t]};color:${TIER_COLOR[t]};margin-right:3px">${t}</span>`).join("")||"<span style='color:#9ca3af;font-size:11px'>—</span>"}</td>
       <td style="text-align:center">${(()=>{
-        const pills=TIERS.filter(t=>l.projectsByTier[t]&&l.projectsByTier[t].submitted).map(t=>{
+        const pills=[];
+        TIERS.forEach(t=>{
           const p=l.projectsByTier[t];
-          const color=p.approved?"#00682A":"#d97706";
-          const bg=p.approved?"#d1fae5":"#fef3c7";
-          const label=p.approved?"✓ "+t.replace("Lean ",""):"⏳ "+t.replace("Lean ","");
-          return `<span class="badge" style="background:${bg};color:${color};margin-right:3px">${label}</span>`;
+          const waived=isProjectWaived(l.email,t);
+          if(p&&p.submitted){
+            const color=p.approved?"#00682A":"#d97706";
+            const bg=p.approved?"#d1fae5":"#fef3c7";
+            const label=p.approved?"✓ "+t.replace("Lean ",""):"⏳ "+t.replace("Lean ","");
+            pills.push(`<span class="badge" style="background:${bg};color:${color};margin-right:3px">${label}</span>`);
+          } else if(waived&&fd.exams.find(x=>x.email===l.email&&x.tier===t&&x.passed)){
+            pills.push(`<span class="badge" style="background:#ede9fe;color:#6d28d9;margin-right:3px">⊘ ${t.replace("Lean ","")}</span>`);
+          }
         });
         return pills.length?pills.join(""):"<span style='color:#9ca3af;font-size:11px'>—</span>";
       })()}</td>
@@ -1569,14 +1578,42 @@ window.showLearnerProfile = function(email){
       }).join("")}
     </div>`:""}
 
-    ${projects.length?`<div class="pb-section">
+    ${projects.length||TIERS.some(t=>isProjectWaived(email,t))?`<div class="pb-section">
       <div class="pb-section-title">Projects</div>
-      ${projects.map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#f9fafb;border-radius:7px;margin-bottom:6px;font-size:13px">
-        <span style="font-weight:600;color:${TIER_COLOR[p.tier]||NAVY}">${p.tier}</span>
-        <span>Submitted: ${p.submitted||"—"}</span>
-        <span style="font-weight:600;color:${isApproved(p)?"#00682A":"#f59e0b"}">${isApproved(p)?"✓ Approved":"⏳ Pending"}</span>
-        <span style="color:#00682A;font-weight:600">${p.savings>0?fmtSavings(p.savings):""}</span>
-      </div>`).join("")}
+      ${TIERS.map(t=>{
+        const waived=isProjectWaived(email,t);
+        const wNote=getWaiverNote(email,t);
+        const proj=projects.filter(p=>p.tier===t);
+        const hasPassed=exams.find(x=>x.tier===t&&x.passed);
+        if(!proj.length&&!waived)return"";
+        if(waived&&hasPassed&&!proj.length){
+          return`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#ede9fe;border-radius:7px;margin-bottom:6px;font-size:13px">
+            <span style="font-weight:600;color:#6d28d9">${t}</span>
+            <span style="color:#6d28d9;font-weight:600">⊘ Project Waived</span>
+            ${wNote?`<span style="font-size:11px;color:#6b7280;font-style:italic">${wNote}</span>`:""}
+          </div>`;
+        }
+        return proj.map(p=>`<div style="background:#f9fafb;border-radius:7px;margin-bottom:6px;padding:8px 12px;font-size:13px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-weight:600;color:${TIER_COLOR[p.tier]||NAVY}">${p.tier}</span>
+            <span style="font-weight:600;color:${isApproved(p)?"#00682A":"#f59e0b"}">${isApproved(p)?"✓ Approved":"⏳ Pending"}</span>
+            <span style="color:#00682A;font-weight:600">${p.savings>0?fmtSavings(p.savings):""}</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <span style="font-size:11px;color:#6b7280">Submitted: ${p.submitted||"—"}</span>
+            ${p.projectType&&p.projectType!=="CI Project"?`<span style="font-size:10px;background:#f3f4f6;color:#6b7280;padding:1px 6px;border-radius:4px">${p.projectType}</span>`:""}
+            <select onchange="updateProjectField('${email}','${t}',${projects.indexOf(p)},'approved',this.value)"
+              style="font-size:11px;border:1px solid #d1d5db;border-radius:5px;padding:2px 6px;font-family:Arial,sans-serif;cursor:pointer">
+              <option value="No"${!isApproved(p)?" selected":""}>⏳ Pending</option>
+              <option value="Yes"${isApproved(p)?" selected":""}>✓ Approved</option>
+            </select>
+            <input type="number" value="${p.savings||0}" min="0" step="500"
+              onchange="updateProjectField('${email}','${t}',${projects.indexOf(p)},'savings',parseFloat(this.value)||0)"
+              style="font-size:11px;border:1px solid #d1d5db;border-radius:5px;padding:2px 6px;width:90px;font-family:Arial,sans-serif"
+              placeholder="Savings $">
+          </div>
+        </div>`).join("");
+      }).join("")}
     </div>`:""}
 
     ${allAttempts.length>1?`<div class="pb-section">
@@ -1596,6 +1633,21 @@ window.showLearnerProfile = function(email){
 };
 
 // ── Manual certification override ────────────────────────────────
+window.updateProjectField = function(email, tier, projIndex, field, value){
+  if(!data)return;
+  // Find the project for this learner+tier
+  const projs=data.projects.filter(p=>p.email===email&&p.tier===tier);
+  if(!projs[projIndex])return;
+  const globalIdx=data.projects.indexOf(projs[projIndex]);
+  if(globalIdx<0)return;
+  data.projects[globalIdx][field]=value;
+  usingLive=true;
+  saveData(data);
+  showSave("✓ Project updated","#86efac");
+  render();
+  setTimeout(()=>window.showLearnerProfile(email),100);
+};
+
 window.toggleProjectWaiver = function(email, tier){
   if(!data)data={...SAMPLE};
   if(!data.projectWaivers)data.projectWaivers={};
