@@ -917,9 +917,11 @@ function parseExcelFile(wb){
         firstKeys.slice(1).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_")) && (
           firstKeyLow===normLow(name) ||
           firstKeyLow===normLow(sn) ||
+          firstKeyLow.includes(normLow(name)) ||
+          firstKeyLow.includes(normLow(sn)) ||
           firstKeys[0].includes("—") ||
           firstKeys[0].includes("DSV") ||
-          firstKeys[0].length>30
+          firstKeys[0].length>20
         );
       if(looksLikeTitle){
         rows=XLSX.utils.sheet_to_json(ws,{defval:"",range:1});
@@ -2518,8 +2520,11 @@ function viewUpload(){
               if(rows2.length){
                 const fk=Object.keys(rows2[0]);
                 const fkl=normLow(fk[0]||"");
-                const titleRow=fk.slice(1).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_"))&&
-                  (fkl===normLow(name)||fkl===normLow(sn)||fk[0].includes("—")||fk[0].includes("DSV")||fk[0].length>30);
+                const restEmpty=fk.slice(1).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_"));
+                const titleRow=restEmpty&&(
+                  fkl===normLow(name)||fkl===normLow(sn)||
+                  fkl.includes(normLow(name))||fkl.includes(normLow(sn))||
+                  fk[0].includes("—")||fk[0].includes("DSV")||fk[0].length>20);
                 if(titleRow)rows2=XLSX.utils.sheet_to_json(ws2,{defval:"",range:1});
               }
               rows2=rows2.filter(r=>{
