@@ -914,7 +914,7 @@ function parseExcelFile(wb){
       // or all remaining keys are __EMPTY
       const firstKeyLow=normLow(firstKeys[0]||"");
       const looksLikeTitle=
-        firstKeys.slice(1).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_")) && (
+        firstKeys.slice(1,4).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_")) && (
           firstKeyLow===normLow(name) ||
           firstKeyLow===normLow(sn) ||
           firstKeyLow.includes(normLow(name)) ||
@@ -925,6 +925,14 @@ function parseExcelFile(wb){
         );
       if(looksLikeTitle){
         rows=XLSX.utils.sheet_to_json(ws,{defval:"",range:1});
+        // Check again — some tabs have multiple header/note rows before real headers
+        if(rows.length){
+          const fk2=Object.keys(rows[0]);
+          const fkl2=normLow(fk2[0]||"");
+          const stillTitle=fk2.slice(1,4).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_"))&&
+            (fkl2.includes(normLow(name))||fkl2.includes(normLow(sn))||fk2[0].length>20||fk2[0].includes("—"));
+          if(stillTitle)rows=XLSX.utils.sheet_to_json(ws,{defval:"",range:2});
+        }
       }
     }
     // Strip any legend/note rows at the bottom (rows where all values are blank or contain "required" text)
@@ -2520,7 +2528,7 @@ function viewUpload(){
               if(rows2.length){
                 const fk=Object.keys(rows2[0]);
                 const fkl=normLow(fk[0]||"");
-                const restEmpty=fk.slice(1).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_"));
+                const restEmpty=fk.slice(1,4).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_"));
                 const titleRow=restEmpty&&(
                   fkl===normLow(name)||fkl===normLow(sn)||
                   fkl.includes(normLow(name))||fkl.includes(normLow(sn))||
