@@ -540,6 +540,8 @@ function checkWeeklyBackup(){
   }
 }
 
+let _saveCount=parseInt(localStorage.getItem("dsv_save_count")||"0");
+
 function saveData(d){
   // Save to localStorage as immediate fallback
   try{localStorage.setItem(STORAGE_KEY,JSON.stringify(d));}catch(e){}
@@ -1332,7 +1334,7 @@ function viewLearners(){
   const exportBtn=document.createElement("button");
   exportBtn.className="export-btn";
   exportBtn.innerHTML="📥 Export to Excel";
-  exportBtn.onclick=()=>exportLearners(learners);
+  exportBtn.onclick=()=>exportLearners(filteredLearners);
   // Non-ops filter
   if(!window.learnerOpsFilter)window.learnerOpsFilter="All";
   const opsToggle=document.createElement("div");
@@ -1536,9 +1538,9 @@ window.showLearnerProfile = function(email){
     else status=null;
 
     // Time calculations
-    const firstWsDate = ws.length ? ws.map(w=>w.date).sort()[0] : null;
-    const passDate = attempts.find(r=>r.passed)?.date||null;
-    const projApprovedDate = approvedProj?.submitted||null;
+    const firstWsDate = ws.length ? xlSerialToDate(ws.map(w=>w.date).sort()[0]) : null;
+    const passDate = xlSerialToDate(attempts.find(r=>r.passed)?.date||null)||null;
+    const projApprovedDate = xlSerialToDate(approvedProj?.submitted||null)||null;
     const daysToTrain = daysBetween(firstWsDate, passDate);
     const daysToCert = daysBetween(passDate, projApprovedDate);
 
@@ -2936,7 +2938,7 @@ function viewReport(){
 
 <div class="footer">DSV Internal · CI & Process Optimization · Americas Network · Data as of ${new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</div>
 
-<script>window.onload=()=>window.print();<\/script>
+<script>setTimeout(()=>window.print(),500);<\/script>
 </body></html>`;
 
   // Store html for the button to use directly on click
@@ -2957,7 +2959,12 @@ function viewReport(){
     if(btn){
       btn.onclick=()=>{
         const win=window.open("","_blank");
-        if(win){win.document.write(window._reportHtml);win.document.close();}
+        if(win){
+          win.document.open();
+          win.document.write(window._reportHtml);
+          win.document.close();
+          win.focus();
+        }
         else{
           // Fallback: download as HTML file
           const blob=new Blob([window._reportHtml],{type:"text/html"});
