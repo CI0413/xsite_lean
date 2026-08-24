@@ -200,10 +200,8 @@ body{font-family:Arial,sans-serif;background:#eef2f7;color:#1f2937;display:flex;
   <div id="profile-box">
     <div class="pb-header">
       <h2 id="pb-title">Learner Profile</h2>
-      <h2 id="pb-title">Learner Profile</h2>
-      <div style="display:flex;align-items:center;gap:8px">
-        <button id="pb-delete-btn" onclick="" style="padding:4px 10px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;display:none">🗑 Delete</button>
-        <button class="pb-close" onclick="document.getElementById('profile-modal').classList.remove('open')">×</button>
+      <button class="pb-close" onclick="document.getElementById('profile-modal').classList.remove('open')">×</button>
+    </div>
     <div class="pb-body" id="pb-body"></div>
   </div>
 </div>
@@ -293,7 +291,6 @@ function trainerStatus(trainer, tier){
 }
 
 function getAtRiskFlags(email, tier){
-  try{
   // Returns {exam: null|"At Risk"|"Escalate", project: null|"At Risk"|"Escalate"}
   const d2=data||SAMPLE;
   const today=new Date();
@@ -325,7 +322,6 @@ function getAtRiskFlags(email, tier){
     }
   }
   return{exam:examFlag,project:projFlag};
-  }catch(e){return{exam:null,project:null};}
 }
 
 function getTrainingDate(email, tier){
@@ -1189,17 +1185,15 @@ function viewExecutive(){
 
   // At-risk counts for Needs Attention tiles
   const _arCount=(()=>{
-    try{
-      let atRisk=0,escalate=0;
-      fd.opsEmails.forEach(email=>{
-        TIERS.forEach(tier=>{
-          const f=getAtRiskFlags(email,tier);
-          if(f.exam==="Escalate"||f.project==="Escalate")escalate++;
-          else if(f.exam==="At Risk"||f.project==="At Risk")atRisk++;
-        });
+    let atRisk=0,escalate=0;
+    fd.opsEmails.forEach(email=>{
+      TIERS.forEach(tier=>{
+        const f=getAtRiskFlags(email,tier);
+        if(f.exam==="Escalate"||f.project==="Escalate")escalate++;
+        else if(f.exam==="At Risk"||f.project==="At Risk")atRisk++;
       });
-      return{atRisk,escalate};
-    }catch(e){console.error("atRisk error:",e);return{atRisk:0,escalate:0};}
+    });
+    return{atRisk,escalate};
   })();
 
   const div=document.createElement("div");
@@ -1474,7 +1468,7 @@ function viewLearners(){
           } else if(waived&&fd.exams.find(x=>x.email===l.email&&x.tier===t&&x.passed)){
             pills.push(`<span class="badge" style="background:#ede9fe;color:#6d28d9;margin-right:3px">⊘ ${t.replace("Lean ","")}</span>`);
           } else {
-            const f=getAtRiskFlags(l.email,t)||{exam:null,project:null};
+            const f=getAtRiskFlags(l.email,t);
             if(f.project){
               const color=f.project==="Escalate"?"#b91c1c":"#d97706";
               const bg=f.project==="Escalate"?"#fee2e2":"#fef3c7";
@@ -1648,25 +1642,6 @@ window.showLearnerProfile = function(email){
   // Render profile
   const name = att.name||(email.endsWith("@internal")?"(No name)":email);
   document.getElementById("pb-title").textContent = name;
-  // Wire delete button
-  const delBtn=document.getElementById("pb-delete-btn");
-  if(delBtn){
-    delBtn.style.display="inline-block";
-    delBtn.onclick=()=>{
-      const conf=prompt(`Delete learner "${name}"?\nType YES to confirm:`);
-      if(!conf||conf.trim().toUpperCase()!=="YES")return;
-      if(!data)return;
-      data.attendees=(data.attendees||[]).filter(a=>a.email!==email);
-      data.exams=(data.exams||[]).filter(x=>x.email!==email);
-      data.allExamRows=(data.allExamRows||[]).filter(x=>x.email!==email);
-      data.projects=(data.projects||[]).filter(p=>p.email!==email);
-      if(data.projectWaivers)Object.keys(data.projectWaivers).forEach(k=>{if(k.startsWith(email+"||"))delete data.projectWaivers[k];});
-      usingLive=true;saveData(data);
-      document.getElementById("profile-modal").classList.remove("open");
-      showSave(`✓ ${name} deleted`,"#86efac");
-      render();
-    };
-  }
 
   const body = document.getElementById("pb-body");
   const sc = STATUS_COLOR, sb = STATUS_BG;
@@ -3133,7 +3108,15 @@ function viewReport(){
             document.body.appendChild(a);a.click();document.body.removeChild(a);
           }
         }catch(e){
-          alert("Report error: "+e.message);
+          alert("Report error: "+e.message+"
+Try downloading instead.");
+        }
+        else{
+          // Fallback: download as HTML file
+          const blob=new Blob([window._reportHtml],{type:"text/html"});
+          const url=URL.createObjectURL(blob);
+          const a=document.createElement("a");
+          a.href=url;a.download="DSV_Lean_Training_Report.html";a.click();
         }
       };
     }
@@ -3628,37 +3611,33 @@ function viewVelocity(){
 
   return d;
 }
-// ── Main render ─────────────────────────────────────────────────
+// ── Main render ───────────────────────────────────────────────────
 function render(){
-  try{buildNav();}catch(e){console.error("buildNav error:",e);}
-  try{
-    document.getElementById("sample-banner").style.display=usingLive?"none":"block";
-    const container=document.getElementById("view-container");
-    container.innerHTML="";
-    const views={
-      executive:viewExecutive,
-      workshops:viewWorkshops,
-      learners:viewLearners,
-      trainers:viewTrainers,
-      projects:viewProjects,
-      "by-tier":viewByTier,
-      "sites":viewSites,
-      "velocity":viewVelocity,
-      "add-workshop":viewAddWorkshop,
-      "add-learners":viewAddLearners,
-      "add-trainer":viewAddTrainer,
-      "add-project":viewAddProject,
-      upload:viewUpload,
-      analytics:viewAnalytics,
-      report:viewReport,
-    };
-    const view=views[activeNav]||viewExecutive;
-    container.appendChild(view());
-  }catch(e){
-    console.error("RENDER ERROR:",e);
-    const container=document.getElementById("view-container");
-    if(container)container.innerHTML='<div style="padding:40px;color:red;font-family:Arial"><b>Render Error:</b> '+e.message+'<br><pre style="font-size:11px">'+e.stack+'</pre></div>';
-  }
+  buildNav();
+  document.getElementById("sample-banner").style.display=usingLive?"none":"block";
+
+  const container=document.getElementById("view-container");
+  container.innerHTML="";
+
+  const views={
+    executive:viewExecutive,
+    workshops:viewWorkshops,
+    learners:viewLearners,
+    trainers:viewTrainers,
+    projects:viewProjects,
+    "by-tier":viewByTier,
+    "sites":viewSites,
+    "velocity":viewVelocity,
+    "add-workshop":viewAddWorkshop,
+    "add-learners":viewAddLearners,
+    "add-trainer":viewAddTrainer,
+    "add-project":viewAddProject,
+    upload:viewUpload,
+    analytics:viewAnalytics,
+    report:viewReport,
+  };
+  const view=views[activeNav]||viewExecutive;
+  container.appendChild(view());
 }
 
 // ── Init ──────────────────────────────────────────────────────────
