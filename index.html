@@ -293,6 +293,7 @@ function trainerStatus(trainer, tier){
 }
 
 function getAtRiskFlags(email, tier){
+  try{
   // Returns {exam: null|"At Risk"|"Escalate", project: null|"At Risk"|"Escalate"}
   const d2=data||SAMPLE;
   const today=new Date();
@@ -324,6 +325,7 @@ function getAtRiskFlags(email, tier){
     }
   }
   return{exam:examFlag,project:projFlag};
+  }catch(e){return{exam:null,project:null};}
 }
 
 function getTrainingDate(email, tier){
@@ -1187,15 +1189,17 @@ function viewExecutive(){
 
   // At-risk counts for Needs Attention tiles
   const _arCount=(()=>{
-    let atRisk=0,escalate=0;
-    fd.opsEmails.forEach(email=>{
-      TIERS.forEach(tier=>{
-        const f=getAtRiskFlags(email,tier);
-        if(f.exam==="Escalate"||f.project==="Escalate")escalate++;
-        else if(f.exam==="At Risk"||f.project==="At Risk")atRisk++;
+    try{
+      let atRisk=0,escalate=0;
+      fd.opsEmails.forEach(email=>{
+        TIERS.forEach(tier=>{
+          const f=getAtRiskFlags(email,tier);
+          if(f.exam==="Escalate"||f.project==="Escalate")escalate++;
+          else if(f.exam==="At Risk"||f.project==="At Risk")atRisk++;
+        });
       });
-    });
-    return{atRisk,escalate};
+      return{atRisk,escalate};
+    }catch(e){console.error("atRisk error:",e);return{atRisk:0,escalate:0};}
   })();
 
   const div=document.createElement("div");
@@ -1470,7 +1474,7 @@ function viewLearners(){
           } else if(waived&&fd.exams.find(x=>x.email===l.email&&x.tier===t&&x.passed)){
             pills.push(`<span class="badge" style="background:#ede9fe;color:#6d28d9;margin-right:3px">⊘ ${t.replace("Lean ","")}</span>`);
           } else {
-            const f=getAtRiskFlags(l.email,t);
+            const f=getAtRiskFlags(l.email,t)||{exam:null,project:null};
             if(f.project){
               const color=f.project==="Escalate"?"#b91c1c":"#d97706";
               const bg=f.project==="Escalate"?"#fee2e2":"#fef3c7";
