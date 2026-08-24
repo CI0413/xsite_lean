@@ -737,7 +737,7 @@ function buildFilterBar(){
   const active=Object.values(globalFilters).some(v=>v!=="All");
   if(active)bar.style.background="#fef9f0";
   bar.innerHTML=`<span>Filter:</span>`;
-  const fields=[["region","Region",opts.regions],["country","Country",opts.countries],["site","Site",opts.sites],["customer","Customer",opts.customers],["trainer","Trainer",opts.trainers],["tier","Tier",TIERS]];
+  const fields=[["region","Region",opts.regions],["country","Countries",opts.countries],["site","Site",opts.sites],["customer","Customer",opts.customers],["trainer","Trainer",opts.trainers],["tier","Tier",TIERS]];
   fields.forEach(([key,label,options])=>{
     const sel=document.createElement("select");
     sel.innerHTML=`<option value="All">All ${label}s</option>`+options.map(o=>`<option${globalFilters[key]===o?' selected':''}>${o}</option>`).join('');
@@ -1081,13 +1081,13 @@ function viewExecutive(){
   const fd=getFilteredData();
   const totalW=fd.workshops.length;
   const totalL=fd.opsEmails.size;
-  const trainedFiltered=fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&(execTierFilter.trained==="All"||x.tier===execTierFilter.trained));
+  const trainedFiltered=fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email));
   const trained=new Set(trainedFiltered.map(x=>x.email)).size;
-  const trainedEmailTiersExec=new Set(fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&(execTierFilter.certified==="All"||x.tier===execTierFilter.certified)).map(x=>x.email+"||"+x.tier));
+  const trainedEmailTiersExec=new Set(fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)).map(x=>x.email+"||"+x.tier));
   // Certified = passed exam + approved project OR passed exam + project waived
   const certifiedEmails=new Set([
     ...fd.projects.filter(p=>isApproved(p)&&trainedEmailTiersExec.has(p.email+"||"+p.tier)&&fd.opsEmails.has(p.email)).map(p=>p.email),
-    ...fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&isProjectWaived(x.email,x.tier)&&(execTierFilter.certified==="All"||x.tier===execTierFilter.certified)).map(x=>x.email),
+    ...fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&isProjectWaived(x.email,x.tier)).map(x=>x.email),
   ]);
   const certified=certifiedEmails.size;
   const approvedProjects=fd.projects.filter(isApproved);
@@ -1145,26 +1145,14 @@ function viewExecutive(){
         <div class="kpi-value" style="color:#002664">${totalL}</div>
       </div>
       <div class="kpi-card" style="border-top-color:#E18635">
-        <div class="kpi-header"><div class="kpi-label">Exam Passed</div>
-          <select onchange="execTierFilter.trained=this.value;render();" onclick="event.stopPropagation()"
-            style="font-size:10px;border:1px solid #d1d5db;border-radius:5px;padding:2px 4px;background:#fff;color:#002664;font-family:Arial,sans-serif;cursor:pointer">
-            <option value="All"${execTierFilter.trained==="All"?" selected":""}>All</option>
-            ${TIERS.map(t=>`<option value="${t}"${execTierFilter.trained===t?" selected":""}>${t.replace("Lean ","")}</option>`).join("")}
-          </select>
-        </div>
+        <div class="kpi-header"><div class="kpi-label">Exam Passed</div><div class="kpi-icon">✅</div></div>
         <div class="kpi-value" style="color:#002664">${trained}</div>
-        <div class="kpi-sub">${pct(trained,totalL)}% of attendees${execTierFilter.trained!=="All"?" · "+execTierFilter.trained:" · unique, any tier"}</div>
+        <div class="kpi-sub">${pct(trained,totalL)}% of attendees · unique, any tier</div>
       </div>
       <div class="kpi-card" style="border-top-color:#00682A">
-        <div class="kpi-header"><div class="kpi-label">Trained</div>
-          <select onchange="execTierFilter.certified=this.value;render();" onclick="event.stopPropagation()"
-            style="font-size:10px;border:1px solid #d1d5db;border-radius:5px;padding:2px 4px;background:#fff;color:#00682A;font-family:Arial,sans-serif;cursor:pointer">
-            <option value="All"${execTierFilter.certified==="All"?" selected":""}>All</option>
-            ${TIERS.map(t=>`<option value="${t}"${execTierFilter.certified===t?" selected":""}>${t.replace("Lean ","")}</option>`).join("")}
-          </select>
-        </div>
+        <div class="kpi-header"><div class="kpi-label">Trained</div><div class="kpi-icon">🏅</div></div>
         <div class="kpi-value" style="color:#00682A">${certified}</div>
-        <div class="kpi-sub">${pct(certified,totalL)}% of attendees${execTierFilter.certified!=="All"?" · "+execTierFilter.certified:""}</div>
+        <div class="kpi-sub">${pct(certified,totalL)}% of attendees</div>
       </div>
       <div class="kpi-card" style="border-top-color:#E18635">
         <div class="kpi-header"><div class="kpi-label">Projects Submitted</div><div class="kpi-icon">💡</div></div>
