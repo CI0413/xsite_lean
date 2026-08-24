@@ -3628,34 +3628,37 @@ function viewVelocity(){
 
   return d;
 }
-// ── Main render ───────────────────────────────────────────────────
+// ── Main render ─────────────────────────────────────────────────
 function render(){
+  try{buildNav();}catch(e){console.error("buildNav error:",e);}
   try{
-  document.getElementById("sample-banner").style.display=usingLive?"none":"block";
-
-  const container=document.getElementById("view-container");
-  container.innerHTML="";
-
-  const views={
-    executive:viewExecutive,
-    workshops:viewWorkshops,
-    learners:viewLearners,
-    trainers:viewTrainers,
-    projects:viewProjects,
-    "by-tier":viewByTier,
-    "sites":viewSites,
-    "velocity":viewVelocity,
-    "add-workshop":viewAddWorkshop,
-    "add-learners":viewAddLearners,
-    "add-trainer":viewAddTrainer,
-    "add-project":viewAddProject,
-    upload:viewUpload,
-    analytics:viewAnalytics,
-    report:viewReport,
-  };
-  const view=views[activeNav]||viewExecutive;
-  container.appendChild(view());
-  }catch(e){console.error("RENDER ERROR:",e);}
+    document.getElementById("sample-banner").style.display=usingLive?"none":"block";
+    const container=document.getElementById("view-container");
+    container.innerHTML="";
+    const views={
+      executive:viewExecutive,
+      workshops:viewWorkshops,
+      learners:viewLearners,
+      trainers:viewTrainers,
+      projects:viewProjects,
+      "by-tier":viewByTier,
+      "sites":viewSites,
+      "velocity":viewVelocity,
+      "add-workshop":viewAddWorkshop,
+      "add-learners":viewAddLearners,
+      "add-trainer":viewAddTrainer,
+      "add-project":viewAddProject,
+      upload:viewUpload,
+      analytics:viewAnalytics,
+      report:viewReport,
+    };
+    const view=views[activeNav]||viewExecutive;
+    container.appendChild(view());
+  }catch(e){
+    console.error("RENDER ERROR:",e);
+    const container=document.getElementById("view-container");
+    if(container)container.innerHTML='<div style="padding:40px;color:red;font-family:Arial"><b>Render Error:</b> '+e.message+'<br><pre style="font-size:11px">'+e.stack+'</pre></div>';
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────
