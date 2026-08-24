@@ -200,9 +200,11 @@ body{font-family:Arial,sans-serif;background:#eef2f7;color:#1f2937;display:flex;
   <div id="profile-box">
     <div class="pb-header">
       <h2 id="pb-title">Learner Profile</h2>
-      <button class="pb-close" onclick="document.getElementById('profile-modal').classList.remove('open')">×</button>
-    </div>
-    <div class="pb-body" id="pb-body"></div>
+      <h2 id="pb-title">Learner Profile</h2>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button id="pb-delete-btn" style="display:none;padding:4px 10px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif">🗑 Delete</button>
+        <button class="pb-close" onclick="document.getElementById('profile-modal').classList.remove('open')">×</button>
+      </div>
   </div>
 </div>
 <!-- Passcode modal -->
@@ -1489,6 +1491,17 @@ d.appendChild(buildFilterBar());
 }
 
 // ── Learner Profile ──────────────────────────────────────────────
+window.updateLearnerField = function(email, field, value){
+  if(!data) return;
+  // Update all attendee records for this email
+  (data.attendees||[]).forEach(a=>{
+    if(a.email===email) a[field]=value.trim();
+  });
+  usingLive=true;
+  saveData(data);
+  showSave("✓ Saved","#86efac");
+};
+
 window.showLearnerProfile = function(email){
   const d2 = data||SAMPLE;
   const atts = d2.attendees.filter(a=>a.email===email);
@@ -1540,6 +1553,25 @@ window.showLearnerProfile = function(email){
   // Render profile
   const name = att.name||(email.endsWith("@internal")?"(No name)":email);
   document.getElementById("pb-title").textContent = name;
+  // Wire delete button
+  const delBtn = document.getElementById("pb-delete-btn");
+  if(delBtn){
+    delBtn.style.display = "inline-block";
+    delBtn.onclick = ()=>{
+      const conf = prompt(`Delete learner "${name}"?\nThis removes all their records.\nType YES to confirm:`);
+      if(!conf || conf.trim().toUpperCase() !== "YES") return;
+      if(!data) return;
+      data.attendees = (data.attendees||[]).filter(a=>a.email!==email);
+      data.exams = (data.exams||[]).filter(x=>x.email!==email);
+      data.allExamRows = (data.allExamRows||[]).filter(x=>x.email!==email);
+      data.projects = (data.projects||[]).filter(p=>p.email!==email);
+      if(data.projectWaivers) Object.keys(data.projectWaivers).forEach(k=>{if(k.startsWith(email+"||"))delete data.projectWaivers[k];});
+      usingLive=true; saveData(data);
+      document.getElementById("profile-modal").classList.remove("open");
+      showSave(`✓ ${name} deleted`,"#86efac");
+      render();
+    };
+  }
 
   const body = document.getElementById("pb-body");
   const sc = STATUS_COLOR, sb = STATUS_BG;
@@ -1549,10 +1581,22 @@ window.showLearnerProfile = function(email){
       <div class="pb-section-title">Learner Info</div>
       <div class="pb-grid">
         <div class="pb-field"><div class="pf-label">Email / ID</div><div class="pf-value">${displayEmail(email)}</div></div>
-        <div class="pb-field"><div class="pf-label">Site</div><div class="pf-value">${att.site||"—"}</div></div>
-        <div class="pb-field"><div class="pf-label">Customer</div><div class="pf-value">${att.customer||"—"}</div></div>
-        <div class="pb-field"><div class="pf-label">Region</div><div class="pf-value">${att.region||"—"}</div></div>
-        <div class="pb-field"><div class="pf-label">Country</div><div class="pf-value">${att.country||"—"}</div></div>
+        <div class="pb-field"><div class="pf-label">Site</div>
+          <input value="${att.site||""}" onchange="updateLearnerField('${email}','site',this.value)"
+            style="width:100%;font-size:13px;border:1px solid #d1d5db;border-radius:5px;padding:3px 7px;font-family:Arial,sans-serif">
+        </div>
+        <div class="pb-field"><div class="pf-label">Customer</div>
+          <input value="${att.customer||""}" onchange="updateLearnerField('${email}','customer',this.value)"
+            style="width:100%;font-size:13px;border:1px solid #d1d5db;border-radius:5px;padding:3px 7px;font-family:Arial,sans-serif">
+        </div>
+        <div class="pb-field"><div class="pf-label">Region</div>
+          <input value="${att.region||""}" onchange="updateLearnerField('${email}','region',this.value)"
+            style="width:100%;font-size:13px;border:1px solid #d1d5db;border-radius:5px;padding:3px 7px;font-family:Arial,sans-serif">
+        </div>
+        <div class="pb-field"><div class="pf-label">Country</div>
+          <input value="${att.country||""}" onchange="updateLearnerField('${email}','country',this.value)"
+            style="width:100%;font-size:13px;border:1px solid #d1d5db;border-radius:5px;padding:3px 7px;font-family:Arial,sans-serif">
+        </div>
         <div class="pb-field"><div class="pf-label">Trainer(s)</div><div class="pf-value">${trainers.join(", ")||"—"}</div></div>
       </div>
     </div>
@@ -2502,9 +2546,29 @@ function viewUpload(){
 
           if(uploadTab==="full"){
             const parsed=parseExcelFile(wb);
-            data={...data,...parsed};if(parsed.questionLabels&&Object.keys(parsed.questionLabels).length){data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};}
+            if(uploadMode==="replace"){
+              // REPLACE: overwrite everything
+              data={...data,...parsed};
+              if(parsed.questionLabels&&Object.keys(parsed.questionLabels).length)data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
               if(parsed.projectWaivers)data.projectWaivers=parsed.projectWaivers;
-          } else {
+            } else {
+              // APPEND: merge each tab, deduplicating by key
+              const wsIds=new Set((data.workshops||[]).map(w=>w.id));
+              data.workshops=[...(data.workshops||[]),...(parsed.workshops||[]).filter(w=>!wsIds.has(w.id))];
+              const attEmails=new Set((data.attendees||[]).map(a=>a.email));
+              data.attendees=[...(data.attendees||[]),...(parsed.attendees||[]).filter(a=>!attEmails.has(a.email))];
+              const examMap={};
+              [...(data.exams||[]),...(parsed.exams||[])].forEach(x=>{const k=x.email+"||"+x.tier;if(!examMap[k]||x.score>examMap[k].score)examMap[k]=x;});
+              data.exams=Object.values(examMap);
+              const allKeys=new Set((data.allExamRows||[]).map(r=>r.email+"||"+r.tier+"||"+r.date));
+              data.allExamRows=[...(data.allExamRows||[]),...(parsed.allExamRows||[]).filter(r=>!allKeys.has(r.email+"||"+r.tier+"||"+r.date))];
+              const projKeys=new Set((data.projects||[]).map(p=>p.email+"||"+p.tier+"||"+p.submitted));
+              data.projects=[...(data.projects||[]),...(parsed.projects||[]).filter(p=>!projKeys.has(p.email+"||"+p.tier+"||"+p.submitted))];
+              const trEmails=new Set((data.trainers||[]).map(t=>t.email));
+              data.trainers=[...(data.trainers||[]),...(parsed.trainers||[]).filter(t=>!trEmails.has(t.email))];
+              if(parsed.questionLabels)data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
+              if(parsed.projectWaivers)data.projectWaivers={...(data.projectWaivers||{}),...parsed.projectWaivers};
+            }
             function sheet(name){
               const sn=wb.SheetNames.find(n=>normLow(n).includes(normLow(name)));
               if(!sn)return[];
