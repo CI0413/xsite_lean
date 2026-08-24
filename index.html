@@ -290,6 +290,59 @@ function trainerStatus(trainer, tier){
   return"In Progress";
 }
 
+function getAtRiskFlags(email, tier){
+  // Returns {exam: null|"At Risk"|"Escalate", project: null|"At Risk"|"Escalate"}
+  const d2=data||SAMPLE;
+  const today=new Date();
+  const trainingDate=getTrainingDate(email,tier);
+  const trainDt=trainingDate?new Date(trainingDate):null;
+  const allRows=(d2.allExamRows||[]).filter(r=>r.email===email&&r.tier===tier);
+  const passed=allRows.some(r=>r.passed);
+  const hasProject=(d2.projects||[]).some(p=>p.email===email&&p.tier===tier);
+
+  let examFlag=null;
+  let projFlag=null;
+
+  if(trainDt&&!isNaN(trainDt)){
+    const daysSince=Math.floor((today-trainDt)/(1000*60*60*24));
+
+    // Exam flags
+    if(!passed){
+      const attempts=allRows.length;
+      if(attempts>=3)examFlag="Escalate";
+      else if(daysSince>7)examFlag="At Risk";
+    }
+
+    // Project flags (only for learners who passed)
+    if(passed&&!hasProject){
+      const warnDays=tier==="Lean 1A"?45:tier==="Lean 1B"?90:null;
+      const escalateDays=tier==="Lean 1A"?90:tier==="Lean 1B"?180:null;
+      if(escalateDays&&daysSince>=escalateDays)projFlag="Escalate";
+      else if(warnDays&&daysSince>=warnDays)projFlag="At Risk";
+    }
+  }
+  return{exam:examFlag,project:projFlag};
+}
+
+function getTrainingDate(email, tier){
+  // Returns the best training date for deadline tracking
+  // Priority: attendee.trainingDate > workshop date > null
+  const d2=data||SAMPLE;
+  const atts=(d2.attendees||[]).filter(a=>a.email===email);
+  // Check for explicit training date on attendee record
+  for(const a of atts){
+    if(a.trainingDate)return a.trainingDate;
+  }
+  // Fall back to workshop date for this tier
+  const tierWsIds=new Set((d2.workshops||[]).filter(w=>w.tier===tier).map(w=>w.id));
+  const wsAtt=atts.find(a=>tierWsIds.has(a.workshopId));
+  if(wsAtt){
+    const ws=(d2.workshops||[]).find(w=>w.id===wsAtt.workshopId);
+    if(ws?.date)return ws.date;
+  }
+  return null;
+}
+
 function isManualCertified(email, tier){
   // Legacy full cert override (kept for backward compat)
   const d2=data||SAMPLE;
@@ -651,7 +704,7 @@ function getFilteredData(){
     workshops:wf,attendees:af,emails,opsEmails,
     exams:d2.exams.filter(x=>(f.tier==="All"||x.tier===f.tier)&&emails.has(x.email)),
     projects:d2.projects.filter(p=>(f.tier==="All"||p.tier===f.tier)&&emails.has(p.email)),
-    trainers:d2.trainers.filter(t=>(f.region==="All"||t.region===f.region)&&(f.country==="All"||t.country===f.country)&&(f.customer==="All"||t.customer===f.customer)),
+    trainers:d2.trainers.filter(t=>(f.region==="All"||t.region===f.region)&&(f.country==="All"||t.country===f.country)&&(f.customer==="All"||t.customer===f.customer)&&(f.site==="All"||t.site===f.site)&&(f.tier==="All"||trainerStatus(t,f.tier)!=="Not Qualified")),
     allExamRows:(d2.allExamRows||[]).filter(x=>(f.tier==="All"||x.tier===f.tier)&&emails.has(x.email)),
     firstPassRate:d2.firstPassRate||0,avgScore:d2.avgScore||0,
   };
@@ -952,7 +1005,7 @@ function parseExcelFile(wb){
   const workshops=wsRaw.map(r=>{const k=Object.keys(r);const _ws=norm(r[findCol(k,"site")||""]||""),_wc=norm(r[findCol(k,"customer","client","account")||""]||"");
     const _dateRaw=r[findCol(k,"date","workshop date","training date")||""];
     return{id:norm(r[findCol(k,"workshop id","id","ws id")||""]),tier:norm(r[findCol(k,"tier")||""]),date:xlSerialToDate(_dateRaw),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),site:_ws,customer:extractCustomer(_ws,_wc),leadTrainer:norm(r[findCol(k,"lead trainer","lead")||""]),coTrainer:norm(r[findCol(k,"co-trainer","co trainer","cotrainer")||""])};}).filter(w=>w.tier||w.date);
-  const attendees=attRaw.map(r=>{const k=Object.keys(r);const _wsId=norm(r[findCol(k,"workshop id","workshop")||""]||"");const _em=normLow(r[findCol(k,"email","email / id","email/id","badge","employee id","id")||""]||"");const _nm=norm(r[findCol(k,"name","full name")||""]||"");const _st=norm(r[findCol(k,"site","location")||""]||"");const _cu=norm(r[findCol(k,"customer","client","account")||""]||"");const _co=norm(r[findCol(k,"country")||""]||"");const _re=norm(r[findCol(k,"region")||""]||"");return{workshopId:_wsId,email:_em,name:_nm,site:_st,customer:extractCustomer(_st,_cu),country:_co,region:_re,trainer:norm(r[findCol(k,"trainer","lead trainer","instructor")||""]||""),learnerType:norm(r[findCol(k,"learner type","type")||""]||""),role:norm(r[findCol(k,"role","job title","position")||""]||""),department:norm(r[findCol(k,"department","dept")||""]||"")};}).map(a=>{
+  const attendees=attRaw.map(r=>{const k=Object.keys(r);const _wsId=norm(r[findCol(k,"workshop id","workshop")||""]||"");const _em=normLow(r[findCol(k,"email","email / id","email/id","badge","employee id","id")||""]||"");const _nm=norm(r[findCol(k,"name","full name")||""]||"");const _st=norm(r[findCol(k,"site","location")||""]||"");const _cu=norm(r[findCol(k,"customer","client","account")||""]||"");const _co=norm(r[findCol(k,"country")||""]||"");const _re=norm(r[findCol(k,"region")||""]||"");return{workshopId:_wsId,email:_em,name:_nm,site:_st,customer:extractCustomer(_st,_cu),country:_co,region:_re,trainingDate:norm(r[findCol(k,"training date","train date","date trained","date")||""]||"")||"",trainer:norm(r[findCol(k,"trainer","lead trainer","instructor")||""]||""),learnerType:norm(r[findCol(k,"learner type","type")||""]||""),role:norm(r[findCol(k,"role","job title","position")||""]||""),department:norm(r[findCol(k,"department","dept")||""]||"")};}).map(a=>{
     // Auto-gen email/ID if missing but name exists
     if((!a.email||!a.email.includes("@"))&&!a.email&&a.name){
       const namePart=a.name.toLowerCase().replace(/\s+/g,".").replace(/[^a-z0-9.]/g,"");
@@ -1081,13 +1134,13 @@ function viewExecutive(){
   const fd=getFilteredData();
   const totalW=fd.workshops.length;
   const totalL=fd.opsEmails.size;
-  const trainedFiltered=fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&(execTierFilter.trained==="All"||x.tier===execTierFilter.trained));
+  const trainedFiltered=fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&(globalFilters.tier==="All"||x.tier===globalFilters.tier));
   const trained=new Set(trainedFiltered.map(x=>x.email)).size;
-  const trainedEmailTiersExec=new Set(fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&(execTierFilter.certified==="All"||x.tier===execTierFilter.certified)).map(x=>x.email+"||"+x.tier));
+  const trainedEmailTiersExec=new Set(fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&(globalFilters.tier==="All"||x.tier===globalFilters.tier)).map(x=>x.email+"||"+x.tier));
   // Certified = passed exam + approved project OR passed exam + project waived
   const certifiedEmails=new Set([
     ...fd.projects.filter(p=>isApproved(p)&&trainedEmailTiersExec.has(p.email+"||"+p.tier)&&fd.opsEmails.has(p.email)).map(p=>p.email),
-    ...fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&isProjectWaived(x.email,x.tier)&&(execTierFilter.certified==="All"||x.tier===execTierFilter.certified)).map(x=>x.email),
+    ...fd.exams.filter(x=>x.passed&&fd.opsEmails.has(x.email)&&isProjectWaived(x.email,x.tier)&&(globalFilters.tier==="All"||x.tier===globalFilters.tier)).map(x=>x.email),
   ]);
   const certified=certifiedEmails.size;
   const approvedProjects=fd.projects.filter(isApproved);
@@ -1156,15 +1209,9 @@ function viewExecutive(){
         <div class="kpi-sub">${pct(trained,totalL)}% of attendees${execTierFilter.trained!=="All"?" · "+execTierFilter.trained:" · unique, any tier"}</div>
       </div>
       <div class="kpi-card" style="border-top-color:#00682A">
-        <div class="kpi-header"><div class="kpi-label">Trained</div>
-          <select onchange="execTierFilter.certified=this.value;render();" onclick="event.stopPropagation()"
-            style="font-size:10px;border:1px solid #d1d5db;border-radius:5px;padding:2px 4px;background:#fff;color:#00682A;font-family:Arial,sans-serif;cursor:pointer">
-            <option value="All"${execTierFilter.certified==="All"?" selected":""}>All</option>
-            ${TIERS.map(t=>`<option value="${t}"${execTierFilter.certified===t?" selected":""}>${t.replace("Lean ","")}</option>`).join("")}
-          </select>
-        </div>
+        <div class="kpi-header"><div class="kpi-label">Trained</div><div class="kpi-icon">🏅</div></div>
         <div class="kpi-value" style="color:#00682A">${certified}</div>
-        <div class="kpi-sub">${pct(certified,totalL)}% of attendees${execTierFilter.certified!=="All"?" · "+execTierFilter.certified:""}</div>
+        <div class="kpi-sub">${pct(certified,totalL)}% of attendees</div>
       </div>
       <div class="kpi-card" style="border-top-color:#E18635">
         <div class="kpi-header"><div class="kpi-label">Projects Submitted</div><div class="kpi-icon">💡</div></div>
@@ -1320,6 +1367,13 @@ function viewLearners(){
       if(learnerStatusFilter==="Exam Passed")return hasPassed&&!hasTrained;
       if(learnerStatusFilter==="Attended Not Passed")return hasFailed;
       if(learnerStatusFilter==="No Exam Yet")return!hasExam;
+      if(learnerStatusFilter==="At Risk"||learnerStatusFilter==="Escalate"){
+        return TIERS.some(t=>{
+          const f=getAtRiskFlags(l.email,t);
+          const level=learnerStatusFilter;
+          return f.exam===level||f.project===level;
+        });
+      }
       return true;
     });
 
@@ -1345,7 +1399,7 @@ function viewLearners(){
       style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${window.learnerOpsFilter===o?"#002664":"#d1d5db"};background:${window.learnerOpsFilter===o?"#002664":"#fff"};color:${window.learnerOpsFilter===o?"#fff":"#6b7280"}">${o}</button>`).join("")}
     <span style="width:1px;height:16px;background:#e5e7eb;display:inline-block;margin:0 4px"></span>
     <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Status:</span>
-    ${["All","No Exam Yet","Attended Not Passed","Exam Passed","Trained"].map(s=>`<button onclick="learnerStatusFilter='${s}';render();"
+    ${["All","No Exam Yet","Attended Not Passed","Exam Passed","Trained","At Risk","Escalate"].map(s=>`<button onclick="learnerStatusFilter='${s}';render();"
       style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${learnerStatusFilter===s?"#002664":"#d1d5db"};background:${learnerStatusFilter===s?"#002664":"#fff"};color:${learnerStatusFilter===s?"#fff":"#6b7280"}">${s}</button>`).join("")}`;
 
   d.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div class="page-title">Learners <span style="font-size:14px;color:#9ca3af;font-weight:400">${filteredLearners.length}${learnerSearch?" of "+learners.length:""} records</span></div></div>`;
@@ -1371,7 +1425,21 @@ function viewLearners(){
           ? l.trainers.map(t=>`<span style="display:inline-flex;align-items:center;gap:4px;background:#f0f3f8;border-radius:5px;padding:2px 7px;font-weight:500;color:#002664;margin-right:3px;margin-bottom:2px">🎓 ${t}</span>`).join("")
           : "<span style='color:#9ca3af;font-size:11px'>—</span>"
       }</td>
-      <td>${l.tiersTrained.map(t=>`<span class="badge" style="background:${TIER_BG[t]};color:${TIER_COLOR[t]};margin-right:3px">${t}</span>`).join("")||"<span style='color:#9ca3af;font-size:11px'>—</span>"}</td>
+      <td>${(()=>{
+        const badges=l.tiersTrained.map(t=>`<span class="badge" style="background:${TIER_BG[t]};color:${TIER_COLOR[t]};margin-right:3px">${t}</span>`);
+        // Add At Risk flags for tiers where exam not yet passed
+        TIERS.forEach(t=>{
+          if(!l.tiersTrained.includes(t)){
+            const f=getAtRiskFlags(l.email,t);
+            if(f.exam){
+              const color=f.exam==="Escalate"?"#b91c1c":"#d97706";
+              const bg=f.exam==="Escalate"?"#fee2e2":"#fef3c7";
+              badges.push(`<span class="badge" style="background:${bg};color:${color};margin-right:3px;font-size:9px">⚠ ${t.replace("Lean ","")} ${f.exam}</span>`);
+            }
+          }
+        });
+        return badges.join("")||"<span style='color:#9ca3af;font-size:11px'>—</span>";
+      })()}</td>
       <td style="text-align:center">${(()=>{
         const pills=[];
         TIERS.forEach(t=>{
@@ -1384,6 +1452,13 @@ function viewLearners(){
             pills.push(`<span class="badge" style="background:${bg};color:${color};margin-right:3px">${label}</span>`);
           } else if(waived&&fd.exams.find(x=>x.email===l.email&&x.tier===t&&x.passed)){
             pills.push(`<span class="badge" style="background:#ede9fe;color:#6d28d9;margin-right:3px">⊘ ${t.replace("Lean ","")}</span>`);
+          } else {
+            const f=getAtRiskFlags(l.email,t);
+            if(f.project){
+              const color=f.project==="Escalate"?"#b91c1c":"#d97706";
+              const bg=f.project==="Escalate"?"#fee2e2":"#fef3c7";
+              pills.push(`<span class="badge" style="background:${bg};color:${color};margin-right:3px;font-size:9px">⚠ ${t.replace("Lean ","")} ${f.project}</span>`);
+            }
           }
         });
         return pills.length?pills.join(""):"<span style='color:#9ca3af;font-size:11px'>—</span>";
@@ -1665,6 +1740,30 @@ window.updateProjectField = function(email, tier, projIndex, field, value){
   setTimeout(()=>window.showLearnerProfile(email),100);
 };
 
+window.deleteLearner = function(email, displayName){
+  const confirmName = prompt(`Delete learner "${displayName}"?\nType YES to confirm:`);
+  if(!confirmName||confirmName.trim().toUpperCase()!=="YES") return;
+  if(!data) return;
+  // Remove from attendees
+  data.attendees = (data.attendees||[]).filter(a=>a.email!==email);
+  // Remove from exams
+  data.exams = (data.exams||[]).filter(x=>x.email!==email);
+  data.allExamRows = (data.allExamRows||[]).filter(x=>x.email!==email);
+  // Remove from projects
+  data.projects = (data.projects||[]).filter(p=>p.email!==email);
+  // Remove from waivers
+  if(data.projectWaivers){
+    Object.keys(data.projectWaivers).forEach(k=>{if(k.startsWith(email+"||"))delete data.projectWaivers[k];});
+  }
+  usingLive=true;
+  saveData(data);
+  showSave(`✓ ${displayName} deleted`,"#86efac");
+  // Close modal and re-render
+  const modal=document.getElementById("learner-modal");
+  if(modal)modal.remove();
+  render();
+};
+
 window.toggleProjectWaiver = function(email, tier){
   if(!data)data={...SAMPLE};
   if(!data.projectWaivers)data.projectWaivers={};
@@ -1726,10 +1825,7 @@ function viewProjects(){
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Projects Submitted</div><div class="kpi-icon">💡</div></div><div class="kpi-value" style="color:#002664">${fd.projects.length}</div></div>
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Projects Approved</div><div class="kpi-icon">✅</div></div><div class="kpi-value" style="color:#002664">${approved.length}</div><div class="kpi-sub">${pct(approved.length,fd.projects.length)}% approval rate</div></div>
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Total Savings</div><div class="kpi-icon">💰</div></div><div class="kpi-value" style="color:#00682A">${fmtSavings(totalSavings)}</div></div>
-      <div class="kpi-card" style="border-top-color:#00682A">
-        <div class="kpi-header"><div class="kpi-label">Certified Trainers</div>
-          <div class="kpi-icon">🎓</div>
-        </div>
+      
         <div class="kpi-value" style="color:#00682A">${fd.trainers.filter(t=>globalFilters.tier==="All"?TIERS.some(ti=>trainerStatus(t,ti)==="Trained"):trainerStatus(t,globalFilters.tier)==="Trained").length}</div>
         <div class="kpi-sub">${globalFilters.tier==="All"?"across all tiers":globalFilters.tier}</div>
       </div>
@@ -2519,9 +2615,28 @@ function viewUpload(){
 
           if(uploadTab==="full"){
             const parsed=parseExcelFile(wb);
-            data={...data,...parsed};if(parsed.questionLabels&&Object.keys(parsed.questionLabels).length){data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};}
-              if(parsed.projectWaivers)data.projectWaivers=parsed.projectWaivers;
-          } else {
+            if(uploadMode==="replace"){
+              data={...data,...parsed};
+              if(parsed.questionLabels&&Object.keys(parsed.questionLabels).length)data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
+              if(parsed.projectWaivers)data.projectWaivers={...(data.projectWaivers||{}),...parsed.projectWaivers};
+            } else {
+              // APPEND: merge each tab, deduplicating by key field
+              const wsIds=new Set((data.workshops||[]).map(w=>w.id));
+              data.workshops=[...(data.workshops||[]),...(parsed.workshops||[]).filter(w=>!wsIds.has(w.id))];
+              const attEmails=new Set((data.attendees||[]).map(a=>a.email));
+              data.attendees=[...(data.attendees||[]),...(parsed.attendees||[]).filter(a=>!attEmails.has(a.email))];
+              const examMap={};
+              [...(data.exams||[]),...(parsed.exams||[])].forEach(x=>{const k=x.email+"||"+x.tier;if(!examMap[k]||x.score>examMap[k].score)examMap[k]=x;});
+              data.exams=Object.values(examMap);
+              const allKeys=new Set((data.allExamRows||[]).map(r=>r.email+"||"+r.tier+"||"+r.date));
+              data.allExamRows=[...(data.allExamRows||[]),...(parsed.allExamRows||[]).filter(r=>!allKeys.has(r.email+"||"+r.tier+"||"+r.date))];
+              const projKeys=new Set((data.projects||[]).map(p=>p.email+"||"+p.tier+"||"+p.submitted));
+              data.projects=[...(data.projects||[]),...(parsed.projects||[]).filter(p=>!projKeys.has(p.email+"||"+p.tier+"||"+p.submitted))];
+              const trEmails=new Set((data.trainers||[]).map(t=>t.email));
+              data.trainers=[...(data.trainers||[]),...(parsed.trainers||[]).filter(t=>!trEmails.has(t.email))];
+              if(parsed.questionLabels)data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
+              if(parsed.projectWaivers)data.projectWaivers={...(data.projectWaivers||{}),...parsed.projectWaivers};
+            }
             function sheet(name){
               const sn=wb.SheetNames.find(n=>normLow(n).includes(normLow(name)));
               if(!sn)return[];
@@ -2604,6 +2719,7 @@ function viewUpload(){
                   site,customer:extractCustomer(site,customer),region,country,
                   learnerType,role,department:dept,
                   trainer:trainerVal,
+                  trainingDate:norm(r[findCol(k,"training date","train date","date trained")||""]||""),
                 });
               });
 
@@ -2958,12 +3074,26 @@ function viewReport(){
     const btn=document.getElementById("open-report-btn");
     if(btn){
       btn.onclick=()=>{
-        const win=window.open("","_blank");
-        if(win){
-          win.document.open();
-          win.document.write(window._reportHtml);
-          win.document.close();
-          win.focus();
+        // Rebuild report fresh at click time with latest data
+        try{
+          const freshHtml=buildReportHtml();
+          const win=window.open("","_blank");
+          if(win){
+            win.document.open();
+            win.document.write(freshHtml);
+            win.document.close();
+            win.focus();
+          } else {
+            // Popup blocked — download as file
+            const blob=new Blob([freshHtml],{type:"text/html"});
+            const url=URL.createObjectURL(blob);
+            const a=document.createElement("a");
+            a.href=url;a.download="DSV_Lean_Training_Report.html";
+            document.body.appendChild(a);a.click();document.body.removeChild(a);
+          }
+        }catch(e){
+          alert("Report error: "+e.message+"
+Try downloading instead.");
         }
         else{
           // Fallback: download as HTML file
