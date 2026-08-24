@@ -737,10 +737,10 @@ function buildFilterBar(){
   const active=Object.values(globalFilters).some(v=>v!=="All");
   if(active)bar.style.background="#fef9f0";
   bar.innerHTML=`<span>Filter:</span>`;
-  const fields=[["region","Region",opts.regions],["country","Countries",opts.countries],["site","Site",opts.sites],["customer","Customer",opts.customers],["trainer","Trainer",opts.trainers],["tier","Tier",TIERS]];
+  const fields=[["region","Region",opts.regions],["country","Country",opts.countries],["site","Site",opts.sites],["customer","Customer",opts.customers],["trainer","Trainer",opts.trainers],["tier","Tier",TIERS]];
   fields.forEach(([key,label,options])=>{
     const sel=document.createElement("select");
-    sel.innerHTML=`<option value="All">All ${label}s</option>`+options.map(o=>`<option${globalFilters[key]===o?' selected':''}>${o}</option>`).join('');
+    sel.innerHTML=`<option value="All">All ${label==="Country"?"Countries":label+"s"}</option>`+options.map(o=>`<option${globalFilters[key]===o?' selected':''}>${o}</option>`).join('');
     sel.addEventListener("change",e=>{globalFilters[key]=e.target.value;render();});
     bar.appendChild(sel);
   });
@@ -1714,13 +1714,8 @@ function viewProjects(){
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Projects Submitted</div><div class="kpi-icon">💡</div></div><div class="kpi-value" style="color:#002664">${fd.projects.length}</div></div>
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Projects Approved</div><div class="kpi-icon">✅</div></div><div class="kpi-value" style="color:#002664">${approved.length}</div><div class="kpi-sub">${pct(approved.length,fd.projects.length)}% approval rate</div></div>
     <div class="kpi-card" style="border-top-color:#E18635"><div class="kpi-header"><div class="kpi-label">Total Savings</div><div class="kpi-icon">💰</div></div><div class="kpi-value" style="color:#00682A">${fmtSavings(totalSavings)}</div></div>
-      <div class="kpi-card" style="border-top-color:#00682A">
-        <div class="kpi-header"><div class="kpi-label">Certified Trainers</div>
-          <div class="kpi-icon">🎓</div>
-        </div>
-        <div class="kpi-value" style="color:#00682A">${fd.trainers.filter(t=>globalFilters.tier==="All"?TIERS.some(ti=>trainerStatus(t,ti)==="Trained"):trainerStatus(t,globalFilters.tier)==="Trained").length}</div>
-        <div class="kpi-sub">${globalFilters.tier==="All"?"across all tiers":globalFilters.tier}</div>
-      </div>
+    <div class="kpi-card" style="border-top-color:#00682A"><div class="kpi-header"><div class="kpi-label">Avg Savings</div><div class="kpi-icon">📈</div></div><div class="kpi-value" style="color:#00682A">${approved.length?fmtSavings(Math.round(totalSavings/approved.length)):"—"}</div><div class="kpi-sub">per approved project</div></div>
+      
   `;
   d.appendChild(kpis);
 
