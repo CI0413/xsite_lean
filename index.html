@@ -3108,15 +3108,7 @@ function viewReport(){
             document.body.appendChild(a);a.click();document.body.removeChild(a);
           }
         }catch(e){
-          alert("Report error: "+e.message+"
-Try downloading instead.");
-        }
-        else{
-          // Fallback: download as HTML file
-          const blob=new Blob([window._reportHtml],{type:"text/html"});
-          const url=URL.createObjectURL(blob);
-          const a=document.createElement("a");
-          a.href=url;a.download="DSV_Lean_Training_Report.html";a.click();
+          alert("Report error: "+e.message);
         }
       };
     }
