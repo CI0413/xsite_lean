@@ -3630,7 +3630,7 @@ function viewVelocity(){
 }
 // ── Main render ───────────────────────────────────────────────────
 function render(){
-  buildNav();
+  try{
   document.getElementById("sample-banner").style.display=usingLive?"none":"block";
 
   const container=document.getElementById("view-container");
@@ -3655,6 +3655,7 @@ function render(){
   };
   const view=views[activeNav]||viewExecutive;
   container.appendChild(view());
+  }catch(e){console.error("RENDER ERROR:",e);}
 }
 
 // ── Init ──────────────────────────────────────────────────────────
