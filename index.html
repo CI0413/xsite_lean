@@ -3071,7 +3071,7 @@ function viewUpload(){
         msg.innerHTML=feedbackHtml;
         window._lastUploadValidation=null;
           document.getElementById("sample-banner").style.display="none";
-        }catch(e){msg.innerHTML=`<div class="alert-error">⚠ Could not read file: ${e.message}</div>`;}
+        }catch(e){console.error("UPLOAD CATCH:",e);msg.innerHTML=`<div class="alert-error">⚠ Error: ${e.message}<br><small>${e.stack||""}</small></div>`;}
       };
       reader.readAsArrayBuffer(file);
     }
