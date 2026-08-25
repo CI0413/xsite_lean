@@ -2997,31 +2997,11 @@ function viewUpload(){
                 const projKeys=new Set((data.projects||[]).map(p=>p.email+"||"+p.tier+"||"+p.submitted));
                 data.projects=[...(data.projects||[]),...newProjs.filter(p=>!projKeys.has(p.email+"||"+p.tier+"||"+p.submitted))];
               }
-            } else if(uploadTab==="certoverrides"){
-              const raw=sheet("cert")||XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:""});
-              if(!data.projectWaivers)data.projectWaivers={};
-              let added=0,removed=0;
-              raw.forEach(r=>{
-                const k=Object.keys(r);
-                const email=normLow(r[findCol(k,"email","email / id","email/id")||""]||"");
-                const tier=norm(r[findCol(k,"tier")||""]||"");
-                const waived=norm(r[findCol(k,"project waived","waived","certified")||""]||"").toLowerCase();
-                const note=norm(r[findCol(k,"note","notes","reason")||""]||"");
-                if(!email||!tier)return;
-                const key=email+"||"+tier;
-                if(waived==="yes"||waived==="true"){data.projectWaivers[key]={note};added++;}
-                else if(waived==="no"||waived==="false"){delete data.projectWaivers[key];removed++;}
-              });
-              usingLive=true;saveData(data);render();
-              msg.innerHTML=`<div class="alert-success">✓ Project waivers updated — ${added} added/updated, ${removed} removed.</div>`;
-              setTimeout(()=>msg.innerHTML="",4000);
-            }
-            else if(uploadTab==="trainers"){
+            } else if(uploadTab==="trainers"){
               const rows=sheet("trainer").map(r=>{const k=Object.keys(r);const yn=key=>{const v=norm(r[findCol(k,key)||""]).toLowerCase();return v==="yes"||v==="true";};return{name:norm(r[findCol(k,"name","trainer name","full name")||""]),email:normLow(r[findCol(k,"email","email / id","email/id")||""]||""),site:norm(r[findCol(k,"site","location")||""]||""),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),customer:norm(r[findCol(k,"customer")||""]),q1a:yn("qualified 1a"),q1b:yn("qualified 1b"),q1c:yn("qualified 1c"),d1a:norm(r[findCol(k,"date certified 1a","date 1a")||""]||""),d1b:norm(r[findCol(k,"date certified 1b","date 1b")||""]||""),d1c:norm(r[findCol(k,"date certified 1c","date 1c")||""]||"")};}).filter(t=>t.name);
               if(uploadMode==="replace"){
                 data.trainers=rows;
               } else {
-                // Append: dedup by email, fallback to name
                 const existingKeys=new Set((data.trainers||[]).map(t=>t.email||t.name));
                 const newRows=rows.filter(t=>!existingKeys.has(t.email||t.name));
                 data.trainers=[...(data.trainers||[]),...newRows];
