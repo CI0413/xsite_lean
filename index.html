@@ -2519,7 +2519,7 @@ function viewAddTrainer(){
       const zone=document.getElementById("cert-zone-"+t);
       const fi=document.getElementById("cert-file-"+t);
       const nameEl=document.getElementById("cert-name-"+t);
-      zone.onclick=()=>fi.click();
+      zone.onclick=()=>{console.log("ZONE CLICKED, fi=",fi);fi.click();};
       zone.ondragover=e=>{e.preventDefault();zone.style.borderColor="#002664";};
       zone.ondragleave=()=>zone.style.borderColor="#d1d5db";
       zone.ondrop=e=>{e.preventDefault();zone.style.borderColor="#d1d5db";fi.files=e.dataTransfer.files;updateCertName(t);};
@@ -2783,15 +2783,18 @@ function viewUpload(){
     zone.ondragover=e=>{e.preventDefault();zone.style.borderColor=NAVY;};
     zone.ondragleave=()=>zone.style.borderColor="#d1d5db";
     zone.ondrop=e=>{e.preventDefault();zone.style.borderColor="#d1d5db";handleUploadFile(e.dataTransfer.files[0]);};
-    fi.onchange=e=>{handleUploadFile(e.target.files[0]);fi.value="";};
+    fi.onchange=e=>{console.log("FILE CHANGED",e.target.files[0]?.name);handleUploadFile(e.target.files[0]);fi.value="";};
 
     function handleUploadFile(file){
+      console.log("UPLOAD: file=",file?.name,"uploadTab=",uploadTab,"uploadMode=",uploadMode);
       if(!file){return;}
       const msg=document.getElementById("up-msg");
       const reader=new FileReader();
       reader.onload=ev=>{
         try{
+          console.log("READER: uploadTab=",uploadTab,"uploadMode=",uploadMode);
           const wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
+          console.log("WB: sheets=",wb.SheetNames);
           if(!data)data={...SAMPLE};
 
           // Require "REPLACE" confirmation for destructive replace operations
