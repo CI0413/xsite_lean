@@ -1569,7 +1569,7 @@ d.appendChild(buildFilterBar());
     <th class="center">Workshops</th><th class="center">Learners</th>
   </tr></thead><tbody>${
     rows.map((t,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
-      <td style="font-weight:600;white-space:nowrap">${t.name}</td>
+      <td style="font-weight:600;white-space:nowrap;cursor:pointer;color:#002664;text-decoration:underline" onclick="showTrainerProfile('${t.name}')">${t.name}</td>
       <td style="font-size:13px;color:#6b7280">${t.email?displayEmail(t.email):"—"}</td>
       <td style="font-size:12px">${t.region||"—"}</td>
       <td style="font-size:12px">${t.country||"—"}</td>
@@ -1586,26 +1586,11 @@ d.appendChild(buildFilterBar());
         return badges.length?`<div style="display:flex;flex-direction:column;gap:2px">${badges.join("")}</div>`:"<span style='color:#9ca3af;font-size:11px'>—</span>";
       })()}</td>
       <td class="center">${certBadge(t,"Lean 1A","q1a")}</td>
-      <td style="white-space:nowrap">
-        ${t.date1a?`<span style="color:#065f46;font-size:12px">${t.date1a}</span>`:""}
-        ${passcodeUnlocked?`<button onclick="markTrainerCertified('${t.name}','Lean 1A')"
-          style="margin-left:4px;padding:2px 7px;font-size:10px;font-weight:600;border-radius:4px;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${t.date1a?"#b91c1c":"#00682A"};background:${t.date1a?"#fee2e2":"#dcfce7"};color:${t.date1a?"#b91c1c":"#00682A"}">
-          ${t.date1a?"✕ Remove":"✓ Certify"}</button>`:""}
-      </td>
+      <td style="color:#6b7280;font-size:12px;white-space:nowrap">${t.date1a||"—"}</td>
       <td class="center">${certBadge(t,"Lean 1B","q1b")}</td>
-      <td style="white-space:nowrap">
-        ${t.date1b?`<span style="color:#065f46;font-size:12px">${t.date1b}</span>`:""}
-        ${passcodeUnlocked?`<button onclick="markTrainerCertified('${t.name}','Lean 1B')"
-          style="margin-left:4px;padding:2px 7px;font-size:10px;font-weight:600;border-radius:4px;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${t.date1b?"#b91c1c":"#00682A"};background:${t.date1b?"#fee2e2":"#dcfce7"};color:${t.date1b?"#b91c1c":"#00682A"}">
-          ${t.date1b?"✕ Remove":"✓ Certify"}</button>`:""}
-      </td>
+      <td style="color:#6b7280;font-size:12px;white-space:nowrap">${t.date1b||"—"}</td>
       <td class="center">${certBadge(t,"Lean 1C","q1c")}</td>
-      <td style="white-space:nowrap">
-        ${t.date1c?`<span style="color:#065f46;font-size:12px">${t.date1c}</span>`:""}
-        ${passcodeUnlocked?`<button onclick="markTrainerCertified('${t.name}','Lean 1C')"
-          style="margin-left:4px;padding:2px 7px;font-size:10px;font-weight:600;border-radius:4px;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${t.date1c?"#b91c1c":"#00682A"};background:${t.date1c?"#fee2e2":"#dcfce7"};color:${t.date1c?"#b91c1c":"#00682A"}">
-          ${t.date1c?"✕ Remove":"✓ Certify"}</button>`:""}
-      </td>
+      <td style="color:#6b7280;font-size:12px;white-space:nowrap">${t.date1c||"—"}</td>
       <td class="center" style="font-weight:700;color:${NAVY}">${t.wLed}</td>
       <td class="center" style="font-weight:700;color:#1e40af">${t.lr}</td>
     </tr>`).join("")
@@ -1629,6 +1614,95 @@ d.appendChild(buildFilterBar());
 }
 
 // ── Learner Profile ──────────────────────────────────────────────
+window.showTrainerProfile = function(trainerName){
+  if(!data)return;
+  const trainer=(data.trainers||[]).find(t=>t.name===trainerName);
+  if(!trainer)return;
+
+  const modal=document.getElementById("profile-modal");
+  document.getElementById("pb-title").textContent=trainerName;
+
+  const delBtn=document.getElementById("pb-delete-btn");
+  if(delBtn)delBtn.style.display="none";
+
+  const body=document.getElementById("pb-body");
+
+  const tierRows=TIERS.map(tier=>{
+    const t=tier.toLowerCase().replace("lean ","").replace(" ","");
+    const qualKey="q"+t;
+    const dateKey="d"+t;
+    const isQual=trainer[qualKey];
+    const certDate=trainer[dateKey]||"";
+    const status=trainerStatus(trainer,tier);
+    const color=status==="Certified"?"#065f46":status==="Qualified"?"#1e40af":"#9ca3af";
+    const bg=status==="Certified"?"#d1fae5":status==="Qualified"?"#dbeafe":"#f3f4f6";
+
+    const certBtn=passcodeUnlocked?`
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        ${isQual?`
+          <input type="date" value="${certDate}" id="cert-date-${t}"
+            style="font-size:12px;border:1px solid #d1d5db;border-radius:5px;padding:3px 7px;font-family:Arial,sans-serif">
+          <button onclick="markTrainerCertifiedFromProfile('${trainerName}','${tier}')"
+            style="padding:4px 12px;font-size:11px;font-weight:600;border-radius:5px;cursor:pointer;font-family:Arial,sans-serif;border:1px solid #00682A;background:#dcfce7;color:#00682A">
+            ✓ ${certDate?"Update Date":"Mark Certified"}</button>
+          ${certDate?`<button onclick="markTrainerCertifiedFromProfile('${trainerName}','${tier}',true)"
+            style="padding:4px 12px;font-size:11px;font-weight:600;border-radius:5px;cursor:pointer;font-family:Arial,sans-serif;border:1px solid #b91c1c;background:#fee2e2;color:#b91c1c">
+            ✕ Remove</button>`:""}
+        `:"<span style='font-size:11px;color:#9ca3af'>Not yet qualified for this tier</span>"}
+      </div>`:"";
+
+    return`<div style="background:#f9fafb;border-radius:8px;padding:12px 14px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <span style="font-weight:700;color:${TIER_COLOR[tier]||NAVY}">${tier}</span>
+        <span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${bg};color:${color}">${status}</span>
+        ${certDate?`<span style="font-size:11px;color:#6b7280">Certified: ${certDate}</span>`:""}
+      </div>
+      ${certBtn}
+    </div>`;
+  }).join("");
+
+  body.innerHTML=`
+    <div class="pb-section">
+      <div class="pb-section-title">Trainer Info</div>
+      <div class="pb-grid">
+        <div class="pb-field"><div class="pf-label">Site</div><div class="pf-value">${trainer.site||"—"}</div></div>
+        <div class="pb-field"><div class="pf-label">Region</div><div class="pf-value">${trainer.region||"—"}</div></div>
+        <div class="pb-field"><div class="pf-label">Country</div><div class="pf-value">${trainer.country||"—"}</div></div>
+        <div class="pb-field"><div class="pf-label">Customer</div><div class="pf-value">${trainer.customer||"—"}</div></div>
+        <div class="pb-field"><div class="pf-label">Email / ID</div><div class="pf-value">${trainer.email?displayEmail(trainer.email):"—"}</div></div>
+      </div>
+    </div>
+    <div class="pb-section">
+      <div class="pb-section-title">Certification Status</div>
+      ${tierRows}
+    </div>
+  `;
+
+  modal.classList.add("open");
+  modal.onclick=e=>{if(e.target===modal)modal.classList.remove("open");};
+};
+
+window.markTrainerCertifiedFromProfile = function(trainerName, tier, remove=false){
+  if(!passcodeUnlocked){requirePasscode("certify",()=>markTrainerCertifiedFromProfile(trainerName,tier,remove));return;}
+  if(!data)return;
+  const t=tier.toLowerCase().replace("lean ","").replace(" ","");
+  const trainer=(data.trainers||[]).find(tr=>tr.name===trainerName);
+  if(!trainer)return;
+  if(remove){
+    trainer["d"+t]="";
+    showSave("Certification date removed","#fca5a5");
+  } else {
+    const dateInput=document.getElementById("cert-date-"+t);
+    const dateVal=dateInput?dateInput.value:new Date().toISOString().slice(0,10);
+    if(!dateVal){showSave("Please enter a date","#fca5a5");return;}
+    trainer["d"+t]=dateVal;
+    trainer["q"+t]=true;
+    showSave(`✓ ${trainerName} certified for ${tier}`,"#86efac");
+  }
+  usingLive=true;saveData(data);render();
+  setTimeout(()=>window.showTrainerProfile(trainerName),100);
+};
+
 window.markTrainerCertified = function(trainerName, tier){
   if(!passcodeUnlocked){requirePasscode("markCert",()=>markTrainerCertified(trainerName,tier));return;}
   if(!data)return;
@@ -2854,10 +2928,17 @@ function viewUpload(){
                 missingWorkshopId,
               };
             } else if(uploadTab==="exams"){
-              // Parse directly from the uploaded workbook
+              // If no "exam" sheet found, alias first sheet as "exam" so parseExcelFile can read it
+              const hasExamSheet=wb.SheetNames.some(n=>normLow(n).includes("exam"));
+              if(!hasExamSheet&&wb.SheetNames.length){
+                // Add an alias so sheet("exam") finds it
+                const firstSheet=wb.SheetNames[0];
+                wb.SheetNames.push("Exam Results");
+                wb.Sheets["Exam Results"]=wb.Sheets[firstSheet];
+              }
               const parsed=parseExcelFile(wb);
               if(!parsed.exams||!parsed.exams.length){
-                msg.innerHTML='<div class="alert-error">No exam data found. Make sure your file has a sheet named "Exam Results" or similar and contains scored rows.</div>';
+                msg.innerHTML='<div class="alert-error">No exam data found. Check that your file contains scored exam rows with Email, Tier, and Score columns (or MS Forms format).</div>';
                 return;
               }
               if(uploadMode==="replace"){
