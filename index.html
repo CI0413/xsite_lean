@@ -623,6 +623,7 @@ function saveData(d){
       return rest;
     }),
     certNums:d.certNums||{},
+    trainers:d.trainers||[],
     projectWaivers:d.projectWaivers||{},
     retrainingFlags:d.retrainingFlags||{},
     certOverrides:d.certOverrides||{},
@@ -715,7 +716,7 @@ function getFilteredData(){
     workshops:wf,attendees:af,emails,opsEmails,
     exams:d2.exams.filter(x=>(f.tier==="All"||x.tier===f.tier)&&emails.has(x.email)),
     projects:d2.projects.filter(p=>(f.tier==="All"||p.tier===f.tier)&&emails.has(p.email)),
-    trainers:d2.trainers.filter(t=>(f.region==="All"||t.region===f.region)&&(f.country==="All"||t.country===f.country)&&(f.customer==="All"||t.customer===f.customer)),
+    trainers:d2.trainers.filter(t=>(f.region==="All"||t.region===f.region)&&(f.country==="All"||t.country===f.country)&&(f.customer==="All"||t.customer===f.customer)&&(f.site==="All"||t.site===f.site)&&(f.tier==="All"||trainerStatus(t,f.tier)!=="Not Qualified")),
     allExamRows:(d2.allExamRows||[]).filter(x=>(f.tier==="All"||x.tier===f.tier)&&emails.has(x.email)),
     firstPassRate:d2.firstPassRate||0,avgScore:d2.avgScore||0,
   };
@@ -1585,11 +1586,26 @@ d.appendChild(buildFilterBar());
         return badges.length?`<div style="display:flex;flex-direction:column;gap:2px">${badges.join("")}</div>`:"<span style='color:#9ca3af;font-size:11px'>—</span>";
       })()}</td>
       <td class="center">${certBadge(t,"Lean 1A","q1a")}</td>
-      <td style="color:#6b7280;white-space:nowrap">${t.date1a||"—"}</td>
+      <td style="white-space:nowrap">
+        ${t.date1a?`<span style="color:#065f46;font-size:12px">${t.date1a}</span>`:""}
+        ${passcodeUnlocked?`<button onclick="markTrainerCertified('${t.name}','Lean 1A')"
+          style="margin-left:4px;padding:2px 7px;font-size:10px;font-weight:600;border-radius:4px;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${t.date1a?"#b91c1c":"#00682A"};background:${t.date1a?"#fee2e2":"#dcfce7"};color:${t.date1a?"#b91c1c":"#00682A"}">
+          ${t.date1a?"✕ Remove":"✓ Certify"}</button>`:""}
+      </td>
       <td class="center">${certBadge(t,"Lean 1B","q1b")}</td>
-      <td style="color:#6b7280;white-space:nowrap">${t.date1b||"—"}</td>
+      <td style="white-space:nowrap">
+        ${t.date1b?`<span style="color:#065f46;font-size:12px">${t.date1b}</span>`:""}
+        ${passcodeUnlocked?`<button onclick="markTrainerCertified('${t.name}','Lean 1B')"
+          style="margin-left:4px;padding:2px 7px;font-size:10px;font-weight:600;border-radius:4px;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${t.date1b?"#b91c1c":"#00682A"};background:${t.date1b?"#fee2e2":"#dcfce7"};color:${t.date1b?"#b91c1c":"#00682A"}">
+          ${t.date1b?"✕ Remove":"✓ Certify"}</button>`:""}
+      </td>
       <td class="center">${certBadge(t,"Lean 1C","q1c")}</td>
-      <td style="color:#6b7280;white-space:nowrap">${t.date1c||"—"}</td>
+      <td style="white-space:nowrap">
+        ${t.date1c?`<span style="color:#065f46;font-size:12px">${t.date1c}</span>`:""}
+        ${passcodeUnlocked?`<button onclick="markTrainerCertified('${t.name}','Lean 1C')"
+          style="margin-left:4px;padding:2px 7px;font-size:10px;font-weight:600;border-radius:4px;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${t.date1c?"#b91c1c":"#00682A"};background:${t.date1c?"#fee2e2":"#dcfce7"};color:${t.date1c?"#b91c1c":"#00682A"}">
+          ${t.date1c?"✕ Remove":"✓ Certify"}</button>`:""}
+      </td>
       <td class="center" style="font-weight:700;color:${NAVY}">${t.wLed}</td>
       <td class="center" style="font-weight:700;color:#1e40af">${t.lr}</td>
     </tr>`).join("")
@@ -1613,6 +1629,35 @@ d.appendChild(buildFilterBar());
 }
 
 // ── Learner Profile ──────────────────────────────────────────────
+window.markTrainerCertified = function(trainerName, tier){
+  if(!passcodeUnlocked){requirePasscode("markCert",()=>markTrainerCertified(trainerName,tier));return;}
+  if(!data)return;
+  const t=tier.toLowerCase().replace("lean ","").replace(" ","");
+  const dateKey="d"+t;
+  const qualKey="q"+t;
+  // Find trainer by name
+  const trainer=(data.trainers||[]).find(tr=>tr.name===trainerName);
+  if(!trainer){showSave("Trainer not found","#fca5a5");return;}
+
+  if(trainer[dateKey]){
+    // Already certified — offer to remove
+    const conf=confirm(`Remove certification date for ${trainerName} — ${tier}?`);
+    if(!conf)return;
+    trainer[dateKey]="";
+    usingLive=true;saveData(data);render();
+    showSave("Certification date removed","#fca5a5");
+  } else {
+    // Set certification date
+    const today=new Date().toISOString().slice(0,10);
+    const dateVal=prompt(`Enter certification date for ${trainerName} — ${tier}:`,today);
+    if(!dateVal)return;
+    trainer[dateKey]=dateVal;
+    trainer[qualKey]=true; // ensure qualified is set
+    usingLive=true;saveData(data);render();
+    showSave(`✓ ${trainerName} certified for ${tier}`,"#86efac");
+  }
+};
+
 window.updateLearnerField = function(email, field, value){
   if(!data) return;
   // Update all attendee records for this email
@@ -2809,17 +2854,37 @@ function viewUpload(){
                 missingWorkshopId,
               };
             } else if(uploadTab==="exams"){
-              const raw=sheet("exam")||sheet(wb.SheetNames[0]);
-              if(!raw||!raw.length){msg.innerHTML='<div class="alert-error">No exam data found. Make sure your file has a sheet named "Exam Results" or similar.</div>';return;}
-              const combined=uploadMode==="replace"?raw:[...(data.allExamRows||[]).map(r=>r),...raw];
-              // Build a minimal workbook for parseExcelFile exam parser
-              const examWb={SheetNames:["exam"],Sheets:{exam:XLSX.utils.aoa_to_sheet([Object.keys(combined[0]||{}),...combined.map(r=>Object.values(r))])}};
-              const parsed=parseExcelFile(examWb);
-              data.exams=parsed.exams;
-              data.allExamRows=parsed.allExamRows;
+              // Parse directly from the uploaded workbook
+              const parsed=parseExcelFile(wb);
+              if(!parsed.exams||!parsed.exams.length){
+                msg.innerHTML='<div class="alert-error">No exam data found. Make sure your file has a sheet named "Exam Results" or similar and contains scored rows.</div>';
+                return;
+              }
+              if(uploadMode==="replace"){
+                data.exams=parsed.exams;
+                data.allExamRows=parsed.allExamRows;
+              } else {
+                // Append: keep best score per email+tier
+                const examMap={};
+                [...(data.exams||[]),...parsed.exams].forEach(x=>{
+                  const k=x.email+"||"+x.tier;
+                  if(!examMap[k]||x.score>examMap[k].score)examMap[k]=x;
+                });
+                data.exams=Object.values(examMap);
+                // Append all exam rows, dedup by email+tier+date
+                const allKeys=new Set((data.allExamRows||[]).map(r=>r.email+"||"+r.tier+"||"+r.date));
+                data.allExamRows=[...(data.allExamRows||[]),...(parsed.allExamRows||[]).filter(r=>!allKeys.has(r.email+"||"+r.tier+"||"+r.date))];
+              }
               data.firstPassRate=parsed.firstPassRate;
               data.avgScore=parsed.avgScore;
-              if(parsed.questionLabels)data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
+              if(parsed.questionLabels&&Object.keys(parsed.questionLabels).length){
+                data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
+              }
+              usingLive=true;saveData(data);render();
+              const passCount=data.exams.filter(x=>x.passed).length;
+              msg.innerHTML=`<div class="alert-success">✓ Exam data updated — ${data.exams.length} learners, ${passCount} passed.</div>`;
+              setTimeout(()=>msg.innerHTML="",5000);
+              return;
             } else if(uploadTab==="projects"){
               const rows=sheet("project").map(r=>{const k=Object.keys(r);return{email:normLow(r[findCol(k,"email")||""]),tier:norm(r[findCol(k,"tier")||""]),submitted:norm(r[findCol(k,"submitted")||""]),approved:norm(r[findCol(k,"approved")||""]),savings:parseFloat((r[findCol(k,"savings ($)","savings","cost savings","saving")||""]||"").toString().replace(/[$,()]/g,""))||0};}).filter(p=>p.email);
               data.projects=uploadMode==="replace"?rows:[...data.projects,...rows];
@@ -2983,7 +3048,7 @@ function viewReport(){
   if(f.site!=="All")filterParts.push(f.site);
   if(f.tier!=="All")filterParts.push(f.tier);
   if(f.trainer!=="All")filterParts.push("Trainer: "+f.trainer);
-  if(filterStartDate||filterEndDate)filterParts.push((filterStartDate||"…")+" to "+(filterEndDate||"…"));
+  if(dateFrom||dateTo)filterParts.push((dateFrom||"…")+" to "+(dateTo||"…"));
   const filterDesc=filterParts.length?filterParts.join(" · "):"All regions, all tiers";
 
   // DSV logo SVG (inline)
@@ -3154,16 +3219,17 @@ function viewReport(){
     const btn=document.getElementById("open-report-btn");
     if(btn){
       btn.onclick=()=>{
-        const win=window.open("","_blank");
-        if(win){
-          win.document.open();
-          win.document.write(window._reportHtml);
-          win.document.close();
-          win.focus();
-        }
-        else{
-          // Fallback: download as HTML file
-          const blob=new Blob([window._reportHtml],{type:"text/html"});
+        if(!window._reportHtml){alert("Report not ready. Please wait a moment and try again.");return;}
+        // Use blob URL — not blocked by popup blockers
+        const blob=new Blob([window._reportHtml],{type:"text/html"});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url;a.target="_blank";a.rel="noopener";
+        document.body.appendChild(a);a.click();document.body.removeChild(a);
+        setTimeout(()=>URL.revokeObjectURL(url),10000);
+        // Fallback kept in case
+        if(false){
+        const blob2=new Blob([window._reportHtml],{type:"text/html"});
           const url=URL.createObjectURL(blob);
           const a=document.createElement("a");
           a.href=url;a.download="DSV_Lean_Training_Report.html";a.click();
