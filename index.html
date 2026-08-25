@@ -2928,17 +2928,19 @@ function viewUpload(){
                 missingWorkshopId,
               };
             } else if(uploadTab==="exams"){
-              // If no "exam" sheet found, alias first sheet as "exam" so parseExcelFile can read it
+              console.log("EXAM UPLOAD: sheets=",wb.SheetNames);
               const hasExamSheet=wb.SheetNames.some(n=>normLow(n).includes("exam"));
+              console.log("EXAM UPLOAD: hasExamSheet=",hasExamSheet);
               if(!hasExamSheet&&wb.SheetNames.length){
-                // Add an alias so sheet("exam") finds it
                 const firstSheet=wb.SheetNames[0];
                 wb.SheetNames.push("Exam Results");
                 wb.Sheets["Exam Results"]=wb.Sheets[firstSheet];
               }
               const parsed=parseExcelFile(wb);
+              console.log("EXAM UPLOAD: parsed.exams=",parsed.exams?.length,"parsed.allExamRows=",parsed.allExamRows?.length);
+              if(parsed.exams&&parsed.exams.length>0)console.log("EXAM UPLOAD: first exam=",JSON.stringify(parsed.exams[0]));
               if(!parsed.exams||!parsed.exams.length){
-                msg.innerHTML='<div class="alert-error">No exam data found. Check that your file contains scored exam rows with Email, Tier, and Score columns (or MS Forms format).</div>';
+                msg.innerHTML='<div class="alert-error">No exam data found. Sheets: '+wb.SheetNames.join(", ")+'. Check console for details.</div>';
                 return;
               }
               if(uploadMode==="replace"){
