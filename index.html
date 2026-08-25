@@ -247,7 +247,7 @@ const TIERS=["Lean 1A","Lean 1B","Lean 1C"];
 const TIER_COLOR={"Lean 1A":"#002664","Lean 1B":"#E18735","Lean 1C":"#00682A"};
 const TIER_BG={"Lean 1A":"#dbeafe","Lean 1B":"#fef3c7","Lean 1C":"#dcfce7"};
 const STATUS_COLOR={"No Exam Yet":"#9ca3af","Attended Not Passed":"#f59e0b","Exam Passed":"#1A56B0","Trained":"#00682A"};
-const STATUS_BG={"No Exam Yet":"#f3f4f6","Attended Not Passed":"#fef3c7","Exam Passed":"#dbeafe","Trained":"#dbeafe","Trained":"#dcfce7"};
+const STATUS_BG={"No Exam Yet":"#f3f4f6","Attended Not Passed":"#fef3c7","Exam Passed":"#dbeafe","Trained":"#dcfce7"};
 const STORAGE_KEY="lean-mgmt-v5";
 
 // ── Logo ─────────────────────────────────────────────────────────
@@ -284,13 +284,13 @@ const isApproved = p => {const v=norm(p.approved).toLowerCase();return v==="yes"
 // Returns true if learner should count in ops KPIs
 // Non-ops: type field contains "non-ops", "non ops", "management", "support", "admin", "salary" etc
 function trainerStatus(trainer, tier){
-  // Returns "Trained", "In Progress", or "Not Qualified"
+  // Returns "Certified", "Qualified", or "Not Qualified"
   const t=tier.toLowerCase().replace("lean ","").replace(" ","");
   const qualified=trainer["q"+t];
-  const dateCert=trainer["date"+t];
+  const dateCert=trainer["d"+t]||trainer["date"+t];
   if(!qualified)return"Not Qualified";
-  if(dateCert)return"Trained";
-  return"In Progress";
+  if(dateCert)return"Certified";
+  return"Qualified";
 }
 
 function getTrainingDate(email, tier){
@@ -1544,13 +1544,13 @@ function viewTrainers(){
       <div class="kpi-sub">${globalFilters.tier==="All"?"across all tiers":globalFilters.tier+" qualified"}</div>
     </div>
     <div class="kpi-card" style="border-top-color:#E18735">
-      <div class="kpi-header"><div class="kpi-label">In Progress</div>${tierSelect('inProgress',globalFilters.tier)}</div>
-      <div class="kpi-value" style="color:#E18735">${trainerCountForTier("In Progress")}</div>
-      <div class="kpi-sub">qualified, pending certification</div>
+      <div class="kpi-header"><div class="kpi-label">Qualified</div>${tierSelect('inProgress',globalFilters.tier)}</div>
+      <div class="kpi-value" style="color:#E18735">${trainerCountForTier("Qualified")}</div>
+      <div class="kpi-sub">qualified, pending certification date</div>
     </div>
     <div class="kpi-card" style="border-top-color:#00682A">
       <div class="kpi-header"><div class="kpi-label">Certified Trainers</div>${tierSelect('certified',globalFilters.tier)}</div>
-      <div class="kpi-value" style="color:#00682A">${trainerCountForTier("Trained")}</div>
+      <div class="kpi-value" style="color:#00682A">${trainerCountForTier("Certified")}</div>
       <div class="kpi-sub">fully certified</div>
     </div>
   `;
@@ -1561,6 +1561,7 @@ d.appendChild(buildFilterBar());
   panel.style.overflowX="auto";
   panel.innerHTML=`<table class="tbl" style="width:100%"><thead><tr>
     <th>Trainer</th><th>Email / ID</th><th>Region</th><th>Country</th><th>Site</th><th>Customer</th>
+    <th>Trainer Status</th>
     <th class="center">1A</th><th>1A Certified</th>
     <th class="center">1B</th><th>1B Certified</th>
     <th class="center">1C</th><th>1C Certified</th>
@@ -1573,6 +1574,16 @@ d.appendChild(buildFilterBar());
       <td style="font-size:12px">${t.country||"—"}</td>
       <td style="font-size:12px">${t.site||"—"}</td>
       <td style="font-size:12px">${t.customer||"—"}</td>
+      <td style="white-space:nowrap">${(()=>{
+        const badges=TIERS.map(tier=>{
+          const s=trainerStatus(t,tier);
+          if(s==="Not Qualified")return"";
+          const color=s==="Certified"?"#065f46":"#1e40af";
+          const bg=s==="Certified"?"#d1fae5":"#dbeafe";
+          return`<span class="badge" style="background:${bg};color:${color};margin-bottom:2px">${tier.replace("Lean ","")} ${s}</span>`;
+        }).filter(Boolean);
+        return badges.length?`<div style="display:flex;flex-direction:column;gap:2px">${badges.join("")}</div>`:"<span style='color:#9ca3af;font-size:11px'>—</span>";
+      })()}</td>
       <td class="center">${certBadge(t,"Lean 1A","q1a")}</td>
       <td style="color:#6b7280;white-space:nowrap">${t.date1a||"—"}</td>
       <td class="center">${certBadge(t,"Lean 1B","q1b")}</td>
@@ -2832,13 +2843,20 @@ function viewUpload(){
               setTimeout(()=>msg.innerHTML="",4000);
             }
             else if(uploadTab==="trainers"){
-              const rows=sheet("trainer").map(r=>{const k=Object.keys(r);const yn=key=>{const v=norm(r[findCol(k,key)||""]).toLowerCase();return v==="yes"||v==="true";};return{name:norm(r[findCol(k,"trainer name","name")||""]),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),customer:norm(r[findCol(k,"customer")||""]),q1a:yn("qualified 1a"),q1b:yn("qualified 1b"),q1c:yn("qualified 1c")};}).filter(t=>t.name);
-              data.trainers=uploadMode==="replace"?rows:dedup([...data.trainers,...rows],"name");
+              const rows=sheet("trainer").map(r=>{const k=Object.keys(r);const yn=key=>{const v=norm(r[findCol(k,key)||""]).toLowerCase();return v==="yes"||v==="true";};return{name:norm(r[findCol(k,"name","trainer name","full name")||""]),email:normLow(r[findCol(k,"email","email / id","email/id")||""]||""),site:norm(r[findCol(k,"site","location")||""]||""),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),customer:norm(r[findCol(k,"customer")||""]),q1a:yn("qualified 1a"),q1b:yn("qualified 1b"),q1c:yn("qualified 1c"),d1a:norm(r[findCol(k,"date certified 1a","date 1a")||""]||""),d1b:norm(r[findCol(k,"date certified 1b","date 1b")||""]||""),d1c:norm(r[findCol(k,"date certified 1c","date 1c")||""]||"")};}).filter(t=>t.name);
+              if(uploadMode==="replace"){
+                data.trainers=rows;
+              } else {
+                // Append: dedup by email, fallback to name
+                const existingKeys=new Set((data.trainers||[]).map(t=>t.email||t.name));
+                const newRows=rows.filter(t=>!existingKeys.has(t.email||t.name));
+                data.trainers=[...(data.trainers||[]),...newRows];
+              }
             }
           }
           usingLive=true;
           saveData(data);
-          showSave("✓ Saved","#86efac");
+          render();
           // Build upload feedback summary
         const newW=(data.workshops||[]).length;
         const newA=(data.attendees||[]).length;
@@ -2953,8 +2971,8 @@ function viewReport(){
   const topCust=topCustEntries[0]||["—",0];
 
   // Trainers
-  const certTrainers=fd.trainers.filter(t=>TIERS.some(ti=>trainerStatus(t,ti)==="Trained")).length;
-  const inProgTrainers=fd.trainers.filter(t=>TIERS.some(ti=>trainerStatus(t,ti)==="In Progress")).length;
+  const certTrainers=fd.trainers.filter(t=>TIERS.some(ti=>trainerStatus(t,ti)==="Certified")).length;
+  const inProgTrainers=fd.trainers.filter(t=>TIERS.some(ti=>trainerStatus(t,ti)==="Qualified")).length;
 
   // Filter description
   const f=globalFilters;
