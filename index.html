@@ -1380,10 +1380,18 @@ function viewLearners(){
       const hasPassed=l.tiersTrained&&l.tiersTrained.length>0;
       const hasTrained=l.tiersApproved&&l.tiersApproved.length>0;
       const hasFailed=fd.allExamRows&&fd.allExamRows.some(x=>x.email===l.email&&!x.passed)&&!hasPassed;
-      if(learnerStatusFilter==="Trained")return hasTrained;
-      if(learnerStatusFilter==="Exam Passed")return hasPassed&&!hasTrained;
+      const hasRetraining=TIERS.some(t=>isRetraining(l.email,t));
+      if(learnerStatusFilter==="Retraining")return hasRetraining;
+      if(learnerStatusFilter==="Trained")return hasTrained&&!hasRetraining;
+      if(learnerStatusFilter==="Exam Passed")return hasPassed&&!hasTrained&&!hasRetraining;
       if(learnerStatusFilter==="Attended Not Passed")return hasFailed;
       if(learnerStatusFilter==="No Exam Yet")return!hasExam;
+      if(learnerStatusFilter==="At Risk"||learnerStatusFilter==="Escalate"){
+        return TIERS.some(t=>{
+          const f=getAtRiskFlags(l.email,t);
+          return f.exam===learnerStatusFilter||f.project===learnerStatusFilter;
+        });
+      }
       return true;
     });
 
