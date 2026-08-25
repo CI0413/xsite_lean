@@ -293,6 +293,66 @@ function trainerStatus(trainer, tier){
   return"In Progress";
 }
 
+function getTrainingDate(email, tier){
+  // Returns training date for deadline calc: attendee.trainingDate or workshop date
+  const d2=data||SAMPLE;
+  const atts=(d2.attendees||[]).filter(a=>a.email===email);
+  for(const a of atts){if(a.trainingDate)return a.trainingDate;}
+  const tierWsIds=new Set((d2.workshops||[]).filter(w=>w.tier===tier).map(w=>w.id));
+  const wsAtt=atts.find(a=>tierWsIds.has(a.workshopId));
+  if(wsAtt){const ws=(d2.workshops||[]).find(w=>w.id===wsAtt.workshopId);if(ws?.date)return ws.date;}
+  return null;
+}
+
+function isRetraining(email, tier){
+  const d2=data||SAMPLE;
+  const key=email+"||"+tier;
+  const flag=(d2.retrainingFlags||{})[key];
+  if(!flag)return false;
+  // Auto-clear if learner has passed a new exam AFTER the flag was set
+  const flagDate=flag.flaggedAt||"";
+  const newPass=(d2.allExamRows||[]).find(r=>r.email===email&&r.tier===tier&&r.passed&&r.date>flagDate);
+  if(newPass){
+    // Auto-clear — don't mutate during render, just return false
+    return false;
+  }
+  return true;
+}
+
+function getAtRiskFlags(email, tier){
+  // Returns {exam: null|"At Risk"|"Escalate", project: null|"At Risk"|"Escalate"}
+  try{
+    const d2=data||SAMPLE;
+    const today=new Date();
+    const trainingDate=getTrainingDate(email,tier);
+    const trainDt=trainingDate?new Date(trainingDate):null;
+    const allRows=(d2.allExamRows||[]).filter(r=>r.email===email&&r.tier===tier);
+    const passed=allRows.some(r=>r.passed);
+    const hasProject=(d2.projects||[]).some(p=>p.email===email&&p.tier===tier&&isApproved(p));
+    const waived=isProjectWaived(email,tier);
+    let examFlag=null, projFlag=null;
+    if(trainDt&&!isNaN(trainDt)){
+      const daysSince=Math.floor((today-trainDt)/(1000*60*60*24));
+      if(!passed){
+        const attempts=allRows.length;
+        if(attempts>=3)examFlag="Escalate";
+        else if(daysSince>7)examFlag="At Risk";
+      }
+      if(passed&&!hasProject&&!waived){
+        const warn1A=45,esc1A=90,warn1B=90,esc1B=180;
+        if(tier==="Lean 1A"){
+          if(daysSince>=esc1A)projFlag="Escalate";
+          else if(daysSince>=warn1A)projFlag="At Risk";
+        } else if(tier==="Lean 1B"){
+          if(daysSince>=esc1B)projFlag="Escalate";
+          else if(daysSince>=warn1B)projFlag="At Risk";
+        }
+      }
+    }
+    return{exam:examFlag,project:projFlag};
+  }catch(e){return{exam:null,project:null};}
+}
+
 function isManualCertified(email, tier){
   // Legacy full cert override (kept for backward compat)
   const d2=data||SAMPLE;
@@ -564,6 +624,7 @@ function saveData(d){
     }),
     certNums:d.certNums||{},
     projectWaivers:d.projectWaivers||{},
+    retrainingFlags:d.retrainingFlags||{},
     certOverrides:d.certOverrides||{},
     questionLabels:d.questionLabels||{},
     _internalIdCounter:d._internalIdCounter||1000,
@@ -1134,9 +1195,21 @@ function viewExecutive(){
   const approvalRate=fd.projects.length?pct(approvedProjects.length,fd.projects.length):0;
 
   const div=document.createElement("div");
+  // Compute at-risk and retraining counts
+  const _rc=(()=>{try{let atRisk=0,escalate=0,retraining=0;fd.opsEmails.forEach(email=>{TIERS.forEach(tier=>{if(isRetraining(email,tier)){retraining++;return;}const f=getAtRiskFlags(email,tier);if(f.exam==="Escalate"||f.project==="Escalate")escalate++;else if(f.exam==="At Risk"||f.project==="At Risk")atRisk++;});});return{atRisk,escalate,retraining};}catch(e){return{atRisk:0,escalate:0,retraining:0};}})();
+
   div.innerHTML=`
-    <div class="page-title">Americas Lean Training Dashboard</div>
-    <div class="page-sub">CI &amp; Process Optimization · Americas Network</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="page-title">Americas Lean Training Dashboard</div>
+        <div class="page-sub">CI &amp; Process Optimization · Americas Network</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${_rc.retraining?`<div onclick="window.learnerStatusFilter='Retraining';activeNav='learners';render();" style="background:#fef3c7;border:1px solid #fbbf24;border-radius:7px;padding:5px 12px;font-size:11px;font-weight:700;color:#92400e;cursor:pointer">🔄 ${_rc.retraining} Retraining</div>`:""}
+        ${_rc.escalate?`<div onclick="window.learnerStatusFilter='Escalate';activeNav='learners';render();" style="background:#fee2e2;border:1px solid #fca5a5;border-radius:7px;padding:5px 12px;font-size:11px;font-weight:700;color:#b91c1c;cursor:pointer">🔴 ${_rc.escalate} Escalate</div>`:""}
+        ${_rc.atRisk?`<div onclick="window.learnerStatusFilter='At Risk';activeNav='learners';render();" style="background:#fef3c7;border:1px solid #fbbf24;border-radius:7px;padding:5px 12px;font-size:11px;font-weight:700;color:#d97706;cursor:pointer">🟡 ${_rc.atRisk} At Risk</div>`:""}
+      </div>
+    </div>
 
     <div class="kpi-grid">
       <div class="kpi-card" style="border-top-color:#E18635">
@@ -1336,7 +1409,7 @@ function viewLearners(){
       style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${window.learnerOpsFilter===o?"#002664":"#d1d5db"};background:${window.learnerOpsFilter===o?"#002664":"#fff"};color:${window.learnerOpsFilter===o?"#fff":"#6b7280"}">${o}</button>`).join("")}
     <span style="width:1px;height:16px;background:#e5e7eb;display:inline-block;margin:0 4px"></span>
     <span style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px">Status:</span>
-    ${["All","No Exam Yet","Attended Not Passed","Exam Passed","Trained"].map(s=>`<button onclick="learnerStatusFilter='${s}';render();"
+    ${["All","No Exam Yet","Attended Not Passed","Exam Passed","Trained","At Risk","Escalate","Retraining"].map(s=>`<button onclick="learnerStatusFilter='${s}';render();"
       style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${learnerStatusFilter===s?"#002664":"#d1d5db"};background:${learnerStatusFilter===s?"#002664":"#fff"};color:${learnerStatusFilter===s?"#fff":"#6b7280"}">${s}</button>`).join("")}`;
 
   d.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div class="page-title">Learners <span style="font-size:14px;color:#9ca3af;font-weight:400">${filteredLearners.length}${learnerSearch?" of "+learners.length:""} records</span></div></div>`;
@@ -1362,7 +1435,24 @@ function viewLearners(){
           ? l.trainers.map(t=>`<span style="display:inline-flex;align-items:center;gap:4px;background:#f0f3f8;border-radius:5px;padding:2px 7px;font-weight:500;color:#002664;margin-right:3px;margin-bottom:2px">🎓 ${t}</span>`).join("")
           : "<span style='color:#9ca3af;font-size:11px'>—</span>"
       }</td>
-      <td>${l.tiersTrained.map(t=>`<span class="badge" style="background:${TIER_BG[t]};color:${TIER_COLOR[t]};margin-right:3px">${t}</span>`).join("")||"<span style='color:#9ca3af;font-size:11px'>—</span>"}</td>
+      <td>${(()=>{
+        const badges=[];
+        TIERS.forEach(t=>{
+          if(isRetraining(l.email,t)){
+            badges.push(`<span class="badge" style="background:#fef3c7;color:#92400e;margin-right:3px">🔄 ${t.replace("Lean ","")}</span>`);
+          } else if(l.tiersTrained.includes(t)){
+            badges.push(`<span class="badge" style="background:${TIER_BG[t]};color:${TIER_COLOR[t]};margin-right:3px">${t}</span>`);
+          } else {
+            const f=getAtRiskFlags(l.email,t);
+            if(f.exam){
+              const color=f.exam==="Escalate"?"#b91c1c":"#d97706";
+              const bg=f.exam==="Escalate"?"#fee2e2":"#fef3c7";
+              badges.push(`<span class="badge" style="background:${bg};color:${color};margin-right:3px;font-size:9px">⚠ ${t.replace("Lean ","")} ${f.exam}</span>`);
+            }
+          }
+        });
+        return badges.join("")||"<span style='color:#9ca3af;font-size:11px'>—</span>";
+      })()}</td>
       <td style="text-align:center">${(()=>{
         const pills=[];
         TIERS.forEach(t=>{
@@ -1611,6 +1701,10 @@ window.showLearnerProfile = function(email){
         const sb2=STATUS_BG[t.status]||"#f3f4f6";
         const waived=isProjectWaived(email,t.tier);
         const waiverNote=getWaiverNote(email,t.tier);
+        const retraining=isRetraining(email,t.tier);
+        const retrainBtn=passcodeUnlocked?`<button onclick="toggleRetraining('${email}','${t.tier}')"
+          style="margin-left:4px;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${retraining?"#92400e":"#6d28d9"};background:${retraining?"#fef3c7":"#ede9fe"};color:${retraining?"#92400e":"#6d28d9"}">
+          ${retraining?"✓ Retraining Set":"🔄 Mark for Retraining"}</button>`:"";
         const overrideBtn=`<button onclick="toggleProjectWaiver('${email}','${t.tier}')"
           style="margin-left:auto;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;border:1px solid ${waived?"#b91c1c":"#d97706"};background:${waived?"#fee2e2":"#fffbeb"};color:${waived?"#b91c1c":"#b45309"}">
           ${waived?"✕ Remove Waiver":"⊘ Waive Project Req"}</button>${waived&&waiverNote?`<div style="font-size:10px;color:#6b7280;margin-top:3px;font-style:italic">Note: ${waiverNote}</div>`:""}`;
@@ -1623,7 +1717,7 @@ window.showLearnerProfile = function(email){
             ${t.daysToTrain!==null?` · Trained in ${fmtDays(t.daysToTrain)}`:""}
             ${t.daysToCert!==null?` · Cert in ${fmtDays(t.daysToCert)}`:""}
           </span>
-          ${overrideBtn}
+          ${overrideBtn}${retrainBtn}
         </div>`;
       }).join("")}
     </div>`:""}
@@ -1695,6 +1789,22 @@ window.updateProjectField = function(email, tier, projIndex, field, value){
   saveData(data);
   showSave("✓ Project updated","#86efac");
   render();
+  setTimeout(()=>window.showLearnerProfile(email),100);
+};
+
+window.toggleRetraining = function(email, tier){
+  if(!passcodeUnlocked){requirePasscode("retraining",()=>toggleRetraining(email,tier));return;}
+  if(!data)data={...SAMPLE};
+  if(!data.retrainingFlags)data.retrainingFlags={};
+  const key=email+"||"+tier;
+  if(data.retrainingFlags[key]){
+    delete data.retrainingFlags[key];
+    showSave("Retraining flag removed","#86efac");
+  } else {
+    data.retrainingFlags[key]={flaggedAt:new Date().toISOString().slice(0,10),tier};
+    showSave("🔄 Marked for Retraining","#fbbf24");
+  }
+  usingLive=true; saveData(data); render();
   setTimeout(()=>window.showLearnerProfile(email),100);
 };
 
