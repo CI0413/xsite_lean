@@ -3026,6 +3026,25 @@ function viewUpload(){
                 const newRows=rows.filter(t=>!existingKeys.has(t.email||t.name));
                 data.trainers=[...(data.trainers||[]),...newRows];
               }
+            } else if(uploadTab==="certoverrides"){
+              const raw=sheet("cert")||XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:""});
+              if(!data.projectWaivers)data.projectWaivers={};
+              let added=0,removed=0;
+              raw.forEach(r=>{
+                const k=Object.keys(r);
+                const email=normLow(r[findCol(k,"email","email / id","email/id")||""]||"");
+                const tier=norm(r[findCol(k,"tier")||""]||"");
+                const waived=norm(r[findCol(k,"project waived","waived","certified")||""]||"").toLowerCase();
+                const note=norm(r[findCol(k,"note","notes","reason")||""]||"");
+                if(!email||!tier)return;
+                const key=email+"||"+tier;
+                if(waived==="yes"||waived==="true"){data.projectWaivers[key]={note};added++;}
+                else if(waived==="no"||waived==="false"){delete data.projectWaivers[key];removed++;}
+              });
+              usingLive=true;saveData(data);render();
+              msg.innerHTML=`<div class="alert-success">✓ Project waivers updated — ${added} added/updated, ${removed} removed.</div>`;
+              setTimeout(()=>msg.innerHTML="",4000);
+              return;
             }
           }
           usingLive=true;
