@@ -1429,7 +1429,7 @@ function viewLearners(){
   const panel=document.createElement("div");panel.className="panel";
   panel.innerHTML=`<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>
     <th>Name</th><th>Email / ID</th><th>Site</th><th>Customer</th><th>Region</th><th>Country</th>
-    <th>Trainer(s)</th><th>Exam Passed</th><th class="center">Project</th><th>Trained</th>
+    <th>Trainer(s)</th><th>Exam Passed</th><th class="center">Project</th><th>Trained</th><th>Status / Flags</th>
   </tr></thead><tbody>${
     filteredLearners.map((l,i)=>`<tr style="background:${i%2?"#f9fafb":"#fff"}">
       <td style="font-weight:600;white-space:nowrap;cursor:pointer;color:#002664;text-decoration:underline;text-underline-offset:2px" onclick="showLearnerProfile('${l.email}')">${l.name}${!isOps(l.learnerType)?'<span style="margin-left:6px;background:#f3f4f6;color:#6b7280;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;vertical-align:middle">Non-Ops</span>':''}</td>
@@ -1446,17 +1446,8 @@ function viewLearners(){
       <td>${(()=>{
         const badges=[];
         TIERS.forEach(t=>{
-          if(isRetraining(l.email,t)){
-            badges.push(`<span class="badge" style="background:#fef3c7;color:#92400e;margin-right:3px">🔄 ${t.replace("Lean ","")}</span>`);
-          } else if(l.tiersTrained.includes(t)){
+          if(l.tiersTrained.includes(t)&&!isRetraining(l.email,t)){
             badges.push(`<span class="badge" style="background:${TIER_BG[t]};color:${TIER_COLOR[t]};margin-right:3px">${t}</span>`);
-          } else {
-            const f=getAtRiskFlags(l.email,t);
-            if(f.exam){
-              const color=f.exam==="Escalate"?"#b91c1c":"#d97706";
-              const bg=f.exam==="Escalate"?"#fee2e2":"#fef3c7";
-              badges.push(`<span class="badge" style="background:${bg};color:${color};margin-right:3px;font-size:9px">⚠ ${t.replace("Lean ","")} ${f.exam}</span>`);
-            }
           }
         });
         return badges.join("")||"<span style='color:#9ca3af;font-size:11px'>—</span>";
@@ -1478,6 +1469,27 @@ function viewLearners(){
         return pills.length?pills.join(""):"<span style='color:#9ca3af;font-size:11px'>—</span>";
       })()}</td>
       <td>${l.tiersApproved.map(t=>`<span class="badge" style="background:#d1fae5;color:#065f46;margin-right:3px">${t}</span>`).join("")||"<span style='color:#9ca3af;font-size:11px'>—</span>"}</td>
+      <td>${(()=>{
+        const flags=[];
+        TIERS.forEach(t=>{
+          if(isRetraining(l.email,t)){
+            flags.push(`<span class="badge" style="background:#fef3c7;color:#92400e;margin-right:3px;margin-bottom:2px">🔄 ${t.replace("Lean ","")} Retraining</span>`);
+            return;
+          }
+          const f=getAtRiskFlags(l.email,t);
+          if(f.exam){
+            const color=f.exam==="Escalate"?"#b91c1c":"#d97706";
+            const bg=f.exam==="Escalate"?"#fee2e2":"#fef3c7";
+            flags.push(`<span class="badge" style="background:${bg};color:${color};margin-right:3px;margin-bottom:2px">⚠ ${t.replace("Lean ","")} Exam ${f.exam}</span>`);
+          }
+          if(f.project){
+            const color=f.project==="Escalate"?"#b91c1c":"#d97706";
+            const bg=f.project==="Escalate"?"#fee2e2":"#fef3c7";
+            flags.push(`<span class="badge" style="background:${bg};color:${color};margin-right:3px;margin-bottom:2px">⚠ ${t.replace("Lean ","")} Project ${f.project}</span>`);
+          }
+        });
+        return flags.length?`<div style="display:flex;flex-wrap:wrap;gap:2px">${flags.join("")}</div>`:"<span style='color:#9ca3af;font-size:11px'>—</span>";
+      })()}</td>
     </tr>`).join("")
   }</tbody></table></div>`;
   d.appendChild(panel);
