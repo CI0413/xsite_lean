@@ -2830,6 +2830,7 @@ function viewUpload(){
               if(parsed.questionLabels)data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
               if(parsed.projectWaivers)data.projectWaivers={...(data.projectWaivers||{}),...parsed.projectWaivers};
             }
+          }
             function sheet(name){
               const sn=wb.SheetNames.find(n=>normLow(n).includes(normLow(name)));
               if(!sn)return[];
@@ -3026,7 +3027,6 @@ function viewUpload(){
               setTimeout(()=>msg.innerHTML="",4000);
               return;
             }
-          }
           usingLive=true;
           saveData(data);
           render();
