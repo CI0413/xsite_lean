@@ -2790,30 +2790,65 @@ function viewUpload(){
       const msg=document.getElementById("up-msg");
       const reader=new FileReader();
       reader.onload=ev=>{
+        const msg=document.getElementById("up-msg");
         try{
           const wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
           if(!data)data={...SAMPLE};
 
-          // Require "REPLACE" confirmation for destructive replace operations
+          // REPLACE requires confirmation
           if(uploadMode==="replace"){
             const conf=document.getElementById("replace-confirm-input");
             if(!conf||conf.value.trim().toUpperCase()!=="REPLACE"){
               msg.innerHTML='<div class="alert-error">⚠ Type <strong>REPLACE</strong> in the confirmation box to overwrite existing data.</div>';
               return;
             }
-            // Take a snapshot before replacing
             snapshotData();
           }
 
+          // ── Sheet helper (shared by all tab handlers) ─────────────
+          function sheet(name){
+            const sn=wb.SheetNames.find(n=>normLow(n).includes(normLow(name)));
+            if(!sn){return[];}
+            const ws2=wb.Sheets[sn];
+            let rows2=XLSX.utils.sheet_to_json(ws2,{defval:""});
+            if(rows2.length){
+              const fk=Object.keys(rows2[0]);
+              const fkl=normLow(fk[0]||"");
+              const restEmpty=fk.slice(1,4).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_"));
+              const isTitle=restEmpty&&(
+                fkl===normLow(name)||fkl===normLow(sn)||
+                fkl.includes(normLow(name))||fkl.includes(normLow(sn))||
+                fk[0].includes("—")||fk[0].includes("DSV")||fk[0].length>20);
+              if(isTitle){
+                rows2=XLSX.utils.sheet_to_json(ws2,{defval:"",range:1});
+                // Double-skip for tabs with multiple header rows (e.g. Trainers)
+                if(rows2.length){
+                  const fk2=Object.keys(rows2[0]);
+                  const fkl2=normLow(fk2[0]||"");
+                  const stillTitle=fk2.slice(1,4).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_"))&&
+                    (fkl2.includes(normLow(name))||fkl2.includes(normLow(sn))||fk2[0].length>20);
+                  if(stillTitle)rows2=XLSX.utils.sheet_to_json(ws2,{defval:"",range:2});
+                }
+              }
+            }
+            // Strip legend/note rows
+            rows2=rows2.filter(r=>{
+              const vals=Object.values(r).map(v=>(v||"").toString().trim()).filter(Boolean);
+              if(!vals.length)return false;
+              const j=vals.join(" ").toLowerCase();
+              return !j.includes("required for dashboard")&&!j.includes("highlighted = optional")&&!j.includes("delete the");
+            });
+            return rows2;
+          }
+
+          // ── Full file ─────────────────────────────────────────────
           if(uploadTab==="full"){
             const parsed=parseExcelFile(wb);
             if(uploadMode==="replace"){
-              // REPLACE: overwrite everything
               data={...data,...parsed};
-              if(parsed.questionLabels&&Object.keys(parsed.questionLabels).length)data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
+              if(parsed.questionLabels)data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
               if(parsed.projectWaivers)data.projectWaivers=parsed.projectWaivers;
             } else {
-              // APPEND: merge each tab, deduplicating by key
               const wsIds=new Set((data.workshops||[]).map(w=>w.id));
               data.workshops=[...(data.workshops||[]),...(parsed.workshops||[]).filter(w=>!wsIds.has(w.id))];
               const attEmails=new Set((data.attendees||[]).map(a=>a.email));
@@ -2825,254 +2860,192 @@ function viewUpload(){
               data.allExamRows=[...(data.allExamRows||[]),...(parsed.allExamRows||[]).filter(r=>!allKeys.has(r.email+"||"+r.tier+"||"+r.date))];
               const projKeys=new Set((data.projects||[]).map(p=>p.email+"||"+p.tier+"||"+p.submitted));
               data.projects=[...(data.projects||[]),...(parsed.projects||[]).filter(p=>!projKeys.has(p.email+"||"+p.tier+"||"+p.submitted))];
-              const trEmails=new Set((data.trainers||[]).map(t=>t.email));
-              data.trainers=[...(data.trainers||[]),...(parsed.trainers||[]).filter(t=>!trEmails.has(t.email))];
+              const trEmails=new Set((data.trainers||[]).map(t=>t.email||t.name));
+              data.trainers=[...(data.trainers||[]),...(parsed.trainers||[]).filter(t=>!trEmails.has(t.email||t.name))];
               if(parsed.questionLabels)data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
               if(parsed.projectWaivers)data.projectWaivers={...(data.projectWaivers||{}),...parsed.projectWaivers};
             }
+
+          // ── Workshops only ────────────────────────────────────────
+          } else if(uploadTab==="workshops"){
+            const rows=sheet("workshop").map(r=>{
+              const k=Object.keys(r);
+              return{id:norm(r[findCol(k,"workshop id","id")||""])||genId(),tier:norm(r[findCol(k,"tier")||""]),date:xlSerialToDate(r[findCol(k,"date","workshop date","training date")||""]),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),site:norm(r[findCol(k,"site")||""]),customer:norm(r[findCol(k,"customer")||""]),leadTrainer:norm(r[findCol(k,"lead trainer","lead")||""]),coTrainer:norm(r[findCol(k,"co-trainer","co trainer")||""])};
+            }).filter(w=>w.tier);
+            if(uploadMode==="replace"){
+              data.workshops=rows;
+            } else {
+              const wsIds=new Set((data.workshops||[]).map(w=>w.id));
+              data.workshops=[...(data.workshops||[]),...rows.filter(w=>!wsIds.has(w.id))];
+            }
+
+          // ── Attendees only ────────────────────────────────────────
+          } else if(uploadTab==="attendees"){
+            const rawRows=sheet("attend");
+            const valid=[],skipped=[],missingEmail=[],missingName=[],missingWorkshopId=[];
+            rawRows.forEach((r,rowNum)=>{
+              const k=Object.keys(r);
+              let email=normLow(r[findCol(k,"email","email / id","email/id","badge","employee id","id")||""]||"");
+              let name=norm(r[findCol(k,"name","full name","learner name")||""]||"");
+              const wsId=norm(r[findCol(k,"workshop id","workshopid","workshop")||""]||"");
+              const site=norm(r[findCol(k,"site","location")||""]||"");
+              const customer=norm(r[findCol(k,"customer","client","account")||""]||"");
+              const region=norm(r[findCol(k,"region")||""]||"");
+              const country=norm(r[findCol(k,"country")||""]||"");
+              const learnerType=norm(r[findCol(k,"learner type","type","role")||""]||"");
+              const trainerVal=norm(r[findCol(k,"trainer","lead trainer","instructor")||""]||"");
+              if(!email){
+                if(!name){skipped.push({row:rowNum+2,reason:"Missing both Email/ID and Name"});return;}
+                missingEmail.push(name);
+                const namePart=name.toLowerCase().replace(/\s+/g,".").replace(/[^a-z0-9.]/g,"");
+                const sitePart=(site||"internal").toLowerCase().replace(/\s+/g,"-").replace(/[^a-z0-9-]/g,"");
+                const ctr=((data._internalIdCounter)||1000)+1;
+                data._internalIdCounter=ctr;
+                email=`${namePart}.${sitePart}.${ctr}@internal`;
+              }
+              if(!name)missingName.push(email);
+              if(!wsId)missingWorkshopId.push(name||email);
+              valid.push({workshopId:wsId||"",email,name:name||email,site,customer:extractCustomer(site,customer),region,country,learnerType,trainer:trainerVal});
+            });
+            if(uploadMode==="replace"){
+              data.attendees=valid;
+            } else {
+              const attEmails=new Set((data.attendees||[]).map(a=>a.email));
+              data.attendees=[...(data.attendees||[]),...valid.filter(a=>!attEmails.has(a.email))];
+            }
+            window._lastUploadValidation={tab:"attendees",total:rawRows.length,imported:valid.length,skipped,missingEmail,missingName,missingWorkshopId};
+
+          // ── Exams only ────────────────────────────────────────────
+          } else if(uploadTab==="exams"){
+            const hasExamSheet=wb.SheetNames.some(n=>normLow(n).includes("exam"));
+            if(!hasExamSheet&&wb.SheetNames.length){
+              wb.SheetNames.push("Exam Results");
+              wb.Sheets["Exam Results"]=wb.Sheets[wb.SheetNames[0]];
+            }
+            const parsed=parseExcelFile(wb);
+            if(!parsed.exams||!parsed.exams.length){
+              msg.innerHTML='<div class="alert-error">No exam data found. Check that your file has an Exam Results sheet with Email, Tier, and Score columns.</div>';
+              return;
+            }
+            if(uploadMode==="replace"){
+              data.exams=parsed.exams;
+              data.allExamRows=parsed.allExamRows;
+            } else {
+              const examMap={};
+              [...(data.exams||[]),...parsed.exams].forEach(x=>{const k=x.email+"||"+x.tier;if(!examMap[k]||x.score>examMap[k].score)examMap[k]=x;});
+              data.exams=Object.values(examMap);
+              const allKeys=new Set((data.allExamRows||[]).map(r=>r.email+"||"+r.tier+"||"+r.date));
+              data.allExamRows=[...(data.allExamRows||[]),...(parsed.allExamRows||[]).filter(r=>!allKeys.has(r.email+"||"+r.tier+"||"+r.date))];
+            }
+            data.firstPassRate=parsed.firstPassRate;
+            data.avgScore=parsed.avgScore;
+            if(parsed.questionLabels)data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
+
+          // ── Projects only ─────────────────────────────────────────
+          } else if(uploadTab==="projects"){
+            const projRaw=sheet("project");
+            const newProjs=[];
+            projRaw.forEach(r=>{
+              const k=Object.keys(r);
+              const email=normLow(r[findCol(k,"email","email / id","email/id")||""]||"");
+              const tier=norm(r[findCol(k,"tier")||""]);
+              const submitted=xlSerialToDate(r[findCol(k,"date submitted","submitted")||""]);
+              const approved=norm(r[findCol(k,"approved")||""]);
+              const rawSav=parseFloat((r[findCol(k,"savings ($)","savings","cost savings")||""]||"").toString().replace(/[$,()]/g,""))||0;
+              const projType=norm(r[findCol(k,"project type","type")||""]||"CI Project");
+              const groupRaw=norm(r[findCol(k,"group members","members")||""]||"");
+              const groupMembers=groupRaw?groupRaw.split(",").map(s=>normLow(s.trim())).filter(Boolean):[];
+              const allMembers=email?[email,...groupMembers.filter(m=>m!==email)]:[...groupMembers];
+              const memberCount=allMembers.length||1;
+              const memberSav=projType==="Group Project"?Math.round(rawSav/memberCount):rawSav;
+              allMembers.forEach(mem=>{
+                if(!mem)return;
+                newProjs.push({email:mem,tier,submitted,approved,savings:memberSav,projectType:projType,isGroupProject:projType==="Group Project",groupSize:memberCount,primaryEmail:email});
+              });
+            });
+            if(uploadMode==="replace"){
+              data.projects=newProjs;
+            } else {
+              const projKeys=new Set((data.projects||[]).map(p=>p.email+"||"+p.tier+"||"+p.submitted));
+              data.projects=[...(data.projects||[]),...newProjs.filter(p=>!projKeys.has(p.email+"||"+p.tier+"||"+p.submitted))];
+            }
+
+          // ── Trainers only ─────────────────────────────────────────
+          } else if(uploadTab==="trainers"){
+            const rows=sheet("trainer").map(r=>{
+              const k=Object.keys(r);
+              const yn=key=>{const v=norm(r[findCol(k,key)||""]).toLowerCase();return v==="yes"||v==="true";};
+              return{name:norm(r[findCol(k,"name","trainer name","full name")||""]),email:normLow(r[findCol(k,"email","email / id","email/id")||""]||""),site:norm(r[findCol(k,"site","location")||""]||""),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),customer:norm(r[findCol(k,"customer")||""]),q1a:yn("qualified 1a"),q1b:yn("qualified 1b"),q1c:yn("qualified 1c"),d1a:norm(r[findCol(k,"date certified 1a","date 1a")||""]||""),d1b:norm(r[findCol(k,"date certified 1b","date 1b")||""]||""),d1c:norm(r[findCol(k,"date certified 1c","date 1c")||""]||"")};
+            }).filter(t=>t.name);
+            if(uploadMode==="replace"){
+              data.trainers=rows;
+            } else {
+              const existingKeys=new Set((data.trainers||[]).map(t=>t.email||t.name));
+              data.trainers=[...(data.trainers||[]),...rows.filter(t=>!existingKeys.has(t.email||t.name))];
+            }
+
+          // ── Cert Overrides only ───────────────────────────────────
+          } else if(uploadTab==="certoverrides"){
+            const raw=sheet("cert");
+            if(!data.projectWaivers)data.projectWaivers={};
+            let added=0,removed=0;
+            raw.forEach(r=>{
+              const k=Object.keys(r);
+              const email=normLow(r[findCol(k,"email","email / id","email/id")||""]||"");
+              const tier=norm(r[findCol(k,"tier")||""]||"");
+              const waived=norm(r[findCol(k,"project waived","waived","certified")||""]||"").toLowerCase();
+              const note=norm(r[findCol(k,"note","notes","reason")||""]||"");
+              if(!email||!tier)return;
+              const key=email+"||"+tier;
+              if(waived==="yes"||waived==="true"){data.projectWaivers[key]={note};added++;}
+              else if(waived==="no"||waived==="false"){delete data.projectWaivers[key];removed++;}
+            });
+            usingLive=true;saveData(data);
+            msg.innerHTML=`<div class="alert-success">✓ Project waivers updated — ${added} added/updated, ${removed} removed.</div>`;
+            setTimeout(()=>{msg.innerHTML="";render();},3000);
+            return;
           }
-            function sheet(name){
-              const sn=wb.SheetNames.find(n=>normLow(n).includes(normLow(name)));
-              if(!sn)return[];
-              const ws2=wb.Sheets[sn];
-              let rows2=XLSX.utils.sheet_to_json(ws2,{defval:""});
-              if(rows2.length){
-                const fk=Object.keys(rows2[0]);
-                const fkl=normLow(fk[0]||"");
-                const restEmpty=fk.slice(1,4).every(k=>k==="__EMPTY"||k.startsWith("__EMPTY_"));
-                const titleRow=restEmpty&&(
-                  fkl===normLow(name)||fkl===normLow(sn)||
-                  fkl.includes(normLow(name))||fkl.includes(normLow(sn))||
-                  fk[0].includes("—")||fk[0].includes("DSV")||fk[0].length>20);
-                if(titleRow)rows2=XLSX.utils.sheet_to_json(ws2,{defval:"",range:1});
-              }
-              rows2=rows2.filter(r=>{
-                const vals=Object.values(r).map(v=>(v||"").toString().trim()).filter(Boolean);
-                if(!vals.length)return false;
-                const j=vals.join(" ").toLowerCase();
-                return !j.includes("required for dashboard")&&!j.includes("highlighted = optional")&&!j.includes("delete the");
-              });
-              return rows2;
-            }
-            function dedup(arr,k){const s=new Set();return arr.filter(x=>{if(s.has(x[k]))return false;s.add(x[k]);return true;});}
-            if(uploadTab==="workshops"){
-              const rows=sheet("workshop").map(r=>{const k=Object.keys(r);const _wos=norm(r[findCol(k,"site")||""]||""),_woc=norm(r[findCol(k,"customer","client","account")||""]||"");return{id:norm(r[findCol(k,"workshop id","id")||""])||genId(),tier:norm(r[findCol(k,"tier")||""]),date:xlSerialToDate(r[findCol(k,"date","workshop date","training date")||""]),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),site:norm(r[findCol(k,"site")||""]),customer:norm(r[findCol(k,"customer")||""]),leadTrainer:norm(r[findCol(k,"lead trainer","lead")||""]),coTrainer:norm(r[findCol(k,"co-trainer","co trainer")||""])};}).filter(w=>w.tier);
-              if(uploadMode==="replace"){
-                data.workshops=rows;
-              } else {
-                const wsIds=new Set((data.workshops||[]).map(w=>w.id));
-                data.workshops=[...(data.workshops||[]),...rows.filter(w=>!wsIds.has(w.id))];
-              }
-            } else if(uploadTab==="attendees"){
-              const rawRows=sheet("attend");
-              // ── Validate and process each row ──
-              const valid=[], skipped=[], warnings=[];
-              const missingEmail=[], missingName=[], missingWorkshopId=[];
-              // Track auto-workshops created for no-ID rows: key = tier|site|date -> wsId
 
-              rawRows.forEach((r,rowNum)=>{
-                const k=Object.keys(r);
-                // DEBUG: log first row column names and values
-                if(rowNum===0){
-                }
-                const email=normLow(r[findCol(k,"email","email / id","email/id","badge","employee id","id")||""]||"");
-                const name=norm(r[findCol(k,"name","full name","learner name")||""]||"");
-                const wsId=norm(r[findCol(k,"workshop id","workshopid","workshop")||""]||"");
-                const site=norm(r[findCol(k,"site","location")||""]||"");
-                const customer=norm(r[findCol(k,"customer","client","account")||""]||"");
-                const region=norm(r[findCol(k,"region")||""]||"");
-                const country=norm(r[findCol(k,"country")||""]||"");
-                const tier=norm(r[findCol(k,"tier")||""]||"");
-                const dateVal=norm(r[findCol(k,"date","training date","workshop date")||""]||"");
-                const learnerType=norm(r[findCol(k,"learner type","type","role","ops")||""]||"");
-                const role=norm(r[findCol(k,"role","job title","position")||""]||"");
-                const dept=norm(r[findCol(k,"department","dept")||""]||"");
-                const displayRow=name||email||(rowNum+2)+" (row "+(rowNum+2)+")";
-
-                // Missing email — try to auto-gen
-                let finalEmail=email;
-                if(!finalEmail){
-                  if(!name){skipped.push({row:rowNum+2,reason:"Missing both Email/ID and Name"});return;}
-                  missingEmail.push(displayRow);
-                  const namePart=name.toLowerCase().replace(/\s+/g,".").replace(/[^a-z0-9.]/g,"");
-                  const sitePart=(site||"internal").toLowerCase().replace(/\s+/g,"-").replace(/[^a-z0-9-]/g,"");
-                  const ctr=((data._internalIdCounter)||1000)+1;
-                  data._internalIdCounter=ctr;
-                  finalEmail=`${namePart}.${sitePart}.${ctr}@internal`;
-                }
-
-                // Missing name — warn but keep
-                if(!name) missingName.push(finalEmail);
-
-                // Workshop ID is optional — learner can exist without one
-                let finalWsId=wsId||"";
-                if(!finalWsId){
-                  missingWorkshopId.push(displayRow);
-                }
-
-                const trainerVal=norm(r[findCol(k,"trainer","lead trainer","instructor")||""]||"");
-                valid.push({
-                  workshopId:finalWsId,
-                  email:finalEmail,
-                  name:name||finalEmail,
-                  site,customer:extractCustomer(site,customer),region,country,
-                  learnerType,role,department:dept,
-                  trainer:trainerVal,
-                });
-              });
-
-              data.attendees=uploadMode==="replace"?valid:[...( data.attendees||[]),...valid];
-
-              // Store validation results for feedback
-              window._lastUploadValidation={
-                tab:"attendees",
-                total:rawRows.length,
-                imported:valid.length,
-                skipped,
-                missingEmail,
-                missingName,
-                missingWorkshopId,
-              };
-            } else if(uploadTab==="exams"){
-              const hasExamSheet=wb.SheetNames.some(n=>normLow(n).includes("exam"));
-              if(!hasExamSheet&&wb.SheetNames.length){
-                const firstSheet=wb.SheetNames[0];
-                wb.SheetNames.push("Exam Results");
-                wb.Sheets["Exam Results"]=wb.Sheets[firstSheet];
-              }
-              const parsed=parseExcelFile(wb);
-              if(!parsed.exams||!parsed.exams.length){
-                msg.innerHTML='<div class="alert-error">No exam data found. Sheets: '+wb.SheetNames.join(", ")+'. Check console for details.</div>';
-                return;
-              }
-              if(uploadMode==="replace"){
-                data.exams=parsed.exams;
-                data.allExamRows=parsed.allExamRows;
-              } else {
-                // Append: keep best score per email+tier
-                const examMap={};
-                [...(data.exams||[]),...parsed.exams].forEach(x=>{
-                  const k=x.email+"||"+x.tier;
-                  if(!examMap[k]||x.score>examMap[k].score)examMap[k]=x;
-                });
-                data.exams=Object.values(examMap);
-                // Append all exam rows, dedup by email+tier+date
-                const allKeys=new Set((data.allExamRows||[]).map(r=>r.email+"||"+r.tier+"||"+r.date));
-                data.allExamRows=[...(data.allExamRows||[]),...(parsed.allExamRows||[]).filter(r=>!allKeys.has(r.email+"||"+r.tier+"||"+r.date))];
-              }
-              data.firstPassRate=parsed.firstPassRate;
-              data.avgScore=parsed.avgScore;
-              if(parsed.questionLabels&&Object.keys(parsed.questionLabels).length){
-                data.questionLabels={...(data.questionLabels||{}),...parsed.questionLabels};
-              }
-              usingLive=true;saveData(data);render();
-              const passCount=data.exams.filter(x=>x.passed).length;
-              msg.innerHTML=`<div class="alert-success">✓ Exam data updated — ${data.exams.length} learners, ${passCount} passed.</div>`;
-              setTimeout(()=>msg.innerHTML="",5000);
-              return;
-            } else if(uploadTab==="projects"){
-              const projRaw2=sheet("project");
-              const newProjs=[];
-              projRaw2.forEach(r=>{
-                const k=Object.keys(r);
-                const email=normLow(r[findCol(k,"email","email / id","email/id")||""]||"");
-                const tier=norm(r[findCol(k,"tier")||""]);
-                const submitted=xlSerialToDate(r[findCol(k,"date submitted","submitted")||""]);
-                const approved=norm(r[findCol(k,"approved")||""]);
-                const rawSav=parseFloat((r[findCol(k,"savings ($)","savings","cost savings")||""]||"").toString().replace(/[$,()]/g,""))||0;
-                const projType=norm(r[findCol(k,"project type","type")||""]||"CI Project");
-                const groupRaw=norm(r[findCol(k,"group members","members")||""]||"");
-                const groupMembers=groupRaw?groupRaw.split(",").map(s=>normLow(s.trim())).filter(Boolean):[];
-                const allMembers=email?[email,...groupMembers.filter(m=>m!==email)]:[...groupMembers];
-                const memberCount=allMembers.length||1;
-                const memberSav=projType==="Group Project"?Math.round(rawSav/memberCount):rawSav;
-                allMembers.forEach(mem=>{
-                  if(!mem)return;
-                  newProjs.push({email:mem,tier,submitted,approved,savings:memberSav,projectType:projType,isGroupProject:projType==="Group Project",groupSize:memberCount,primaryEmail:email});
-                });
-                if(!email&&!groupMembers.length)return;
-              });
-              if(uploadMode==="replace"){
-                data.projects=newProjs;
-              } else {
-                const projKeys=new Set((data.projects||[]).map(p=>p.email+"||"+p.tier+"||"+p.submitted));
-                data.projects=[...(data.projects||[]),...newProjs.filter(p=>!projKeys.has(p.email+"||"+p.tier+"||"+p.submitted))];
-              }
-            } else if(uploadTab==="trainers"){
-              const rows=sheet("trainer").map(r=>{const k=Object.keys(r);const yn=key=>{const v=norm(r[findCol(k,key)||""]).toLowerCase();return v==="yes"||v==="true";};return{name:norm(r[findCol(k,"name","trainer name","full name")||""]),email:normLow(r[findCol(k,"email","email / id","email/id")||""]||""),site:norm(r[findCol(k,"site","location")||""]||""),region:norm(r[findCol(k,"region")||""]),country:norm(r[findCol(k,"country")||""]),customer:norm(r[findCol(k,"customer")||""]),q1a:yn("qualified 1a"),q1b:yn("qualified 1b"),q1c:yn("qualified 1c"),d1a:norm(r[findCol(k,"date certified 1a","date 1a")||""]||""),d1b:norm(r[findCol(k,"date certified 1b","date 1b")||""]||""),d1c:norm(r[findCol(k,"date certified 1c","date 1c")||""]||"")};}).filter(t=>t.name);
-              if(uploadMode==="replace"){
-                data.trainers=rows;
-              } else {
-                const existingKeys=new Set((data.trainers||[]).map(t=>t.email||t.name));
-                const newRows=rows.filter(t=>!existingKeys.has(t.email||t.name));
-                data.trainers=[...(data.trainers||[]),...newRows];
-              }
-            } else if(uploadTab==="certoverrides"){
-              const raw=sheet("cert")||XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:""});
-              if(!data.projectWaivers)data.projectWaivers={};
-              let added=0,removed=0;
-              raw.forEach(r=>{
-                const k=Object.keys(r);
-                const email=normLow(r[findCol(k,"email","email / id","email/id")||""]||"");
-                const tier=norm(r[findCol(k,"tier")||""]||"");
-                const waived=norm(r[findCol(k,"project waived","waived","certified")||""]||"").toLowerCase();
-                const note=norm(r[findCol(k,"note","notes","reason")||""]||"");
-                if(!email||!tier)return;
-                const key=email+"||"+tier;
-                if(waived==="yes"||waived==="true"){data.projectWaivers[key]={note};added++;}
-                else if(waived==="no"||waived==="false"){delete data.projectWaivers[key];removed++;}
-              });
-              usingLive=true;saveData(data);render();
-              msg.innerHTML=`<div class="alert-success">✓ Project waivers updated — ${added} added/updated, ${removed} removed.</div>`;
-              setTimeout(()=>msg.innerHTML="",4000);
-              return;
-            }
+          // ── Save and show feedback ────────────────────────────────
           usingLive=true;
           saveData(data);
-          render();
-          // Build upload feedback summary
-        const newW=(data.workshops||[]).length;
-        const newA=(data.attendees||[]).length;
-        const newE=(data.exams||[]).length;
-        const newP=(data.projects||[]).length;
-        const newT=(data.trainers||[]).length;
-        const val=window._lastUploadValidation||{};
-        const dupEmails=uploadTab==="attendees"
-          ? (()=>{const emails=(data.attendees||[]).map(a=>a.email);const seen=new Set();let dups=0;emails.forEach(e=>{if(seen.has(e))dups++;else seen.add(e);});return dups;})()
-          : 0;
-        let feedbackHtml=`<div class="upload-feedback">
-          <div class="uf-title">✓ Upload complete (${uploadMode})</div>`;
-        if(uploadTab==="full"||uploadTab==="workshops")feedbackHtml+=`<div class="uf-row"><span>Workshops</span><span><strong>${newW}</strong> records</span></div>`;
-        if(uploadTab==="full"||uploadTab==="attendees")feedbackHtml+=`<div class="uf-row"><span>Attendees</span><span><strong>${newA}</strong> records</span></div>`;
-        if(uploadTab==="full"||uploadTab==="exams")feedbackHtml+=`<div class="uf-row"><span>Exam records</span><span><strong>${newE}</strong> learners with scores</span></div>`;
-        if(uploadTab==="full"||uploadTab==="projects")feedbackHtml+=`<div class="uf-row"><span>Projects</span><span><strong>${newP}</strong> records</span></div>`;
-        if(uploadTab==="full"||uploadTab==="trainers")feedbackHtml+=`<div class="uf-row"><span>Trainers</span><span><strong>${newT}</strong> records</span></div>`;
-        if(dupEmails>0)feedbackHtml+=`<div class="uf-warn">⚠ ${dupEmails} duplicate email/ID found in attendees. Consider using Replace mode to avoid double-counting.</div>`;
 
-        // Attendee-specific validation detail
-        if(uploadTab==="attendees"&&val.tab==="attendees"){
-          feedbackHtml+=`<div class="uf-row"><span>Total rows in file</span><span><strong>${val.total}</strong></span></div>`;
-          feedbackHtml+=`<div class="uf-row"><span>Successfully imported</span><span><strong>${val.imported}</strong></span></div>`;
-          if(val.skipped&&val.skipped.length>0){
-            feedbackHtml+=`<div class="uf-warn">⚠ <strong>${val.skipped.length} row${val.skipped.length!==1?"s":""} skipped</strong> (missing both Email/ID and Name — cannot import):<br>${val.skipped.map(s=>`Row ${s.row}: ${s.reason}`).join("<br>")}</div>`;
-          }
-          if(val.missingEmail&&val.missingEmail.length>0){
-            feedbackHtml+=`<div class="uf-warn" style="border-color:#fed7aa;background:#fef9f0">⚠ <strong>${val.missingEmail.length} learner${val.missingEmail.length!==1?"s":""} had no Email/ID</strong> — auto-generated internal IDs assigned:<br><span style="font-size:10px;color:#6b7280">${val.missingEmail.slice(0,5).join(", ")}${val.missingEmail.length>5?" + "+(val.missingEmail.length-5)+" more":""}</span></div>`;
-          }
-          if(val.missingName&&val.missingName.length>0){
-            feedbackHtml+=`<div class="uf-warn" style="border-color:#fca5a5;background:#fff1f2">⚠ <strong>${val.missingName.length} row${val.missingName.length!==1?"s":""} missing Name</strong> — imported using Email/ID as display name:<br><span style="font-size:10px;color:#6b7280">${val.missingName.slice(0,5).join(", ")}${val.missingName.length>5?" + "+(val.missingName.length-5)+" more":""}</span></div>`;
-          }
-          if(val.missingWorkshopId&&val.missingWorkshopId.length>0){
-            feedbackHtml+=`<div class="uf-warn" style="border-color:#a5b4fc;background:#eef2ff">ℹ <strong>${val.missingWorkshopId.length} learner${val.missingWorkshopId.length!==1?"s":""} had no Workshop ID</strong> — imported without workshop link (site-directed training):<br><span style="font-size:10px;color:#6b7280">${(val.autoWsCreated||[]).map(w=>`${w.tier||"?"} · ${w.site||"?"} · ${w.date||"?"}`).slice(0,4).join(" | ")}${(val.autoWsCreated||[]).length>4?" + more":""}</span></div>`;
-          }
-        }
+          // Build feedback
+          const newW=(data.workshops||[]).length;
+          const newA=(data.attendees||[]).length;
+          const newE=(data.exams||[]).length;
+          const newP=(data.projects||[]).length;
+          const newT=(data.trainers||[]).length;
+          const val=window._lastUploadValidation||{};
+          let feedbackHtml=`<div class="upload-feedback"><div class="uf-title">✓ Upload complete (${uploadMode})</div>`;
+          if(uploadTab==="full"||uploadTab==="workshops")feedbackHtml+=`<div class="uf-row"><span>Workshops</span><span><strong>${newW}</strong> records</span></div>`;
+          if(uploadTab==="full"||uploadTab==="attendees")feedbackHtml+=`<div class="uf-row"><span>Attendees</span><span><strong>${newA}</strong> records</span></div>`;
+          if(uploadTab==="full"||uploadTab==="exams")feedbackHtml+=`<div class="uf-row"><span>Exams</span><span><strong>${newE}</strong> learners</span></div>`;
+          if(uploadTab==="full"||uploadTab==="projects")feedbackHtml+=`<div class="uf-row"><span>Projects</span><span><strong>${newP}</strong> records</span></div>`;
+          if(uploadTab==="full"||uploadTab==="trainers")feedbackHtml+=`<div class="uf-row"><span>Trainers</span><span><strong>${newT}</strong> records</span></div>`;
 
-        feedbackHtml+=`</div>`;
-        msg.innerHTML=feedbackHtml;
-        window._lastUploadValidation=null;
+          if(uploadTab==="attendees"&&val.tab==="attendees"){
+            feedbackHtml+=`<div class="uf-row"><span>Rows in file</span><span><strong>${val.total}</strong></span></div>`;
+            feedbackHtml+=`<div class="uf-row"><span>Imported</span><span><strong>${val.imported}</strong></span></div>`;
+            if(val.skipped&&val.skipped.length)feedbackHtml+=`<div class="uf-warn">⚠ ${val.skipped.length} row(s) skipped — missing Email/ID and Name.</div>`;
+            if(val.missingEmail&&val.missingEmail.length)feedbackHtml+=`<div class="uf-warn">⚠ ${val.missingEmail.length} learner(s) had no Email/ID — auto-IDs assigned.</div>`;
+            if(val.missingWorkshopId&&val.missingWorkshopId.length)feedbackHtml+=`<div class="uf-warn" style="border-color:#a5b4fc">ℹ ${val.missingWorkshopId.length} learner(s) had no Workshop ID — imported without workshop link.</div>`;
+          }
+
+          feedbackHtml+=`</div>`;
+          msg.innerHTML=feedbackHtml;
+          window._lastUploadValidation=null;
           document.getElementById("sample-banner").style.display="none";
-        }catch(e){console.error("UPLOAD CATCH:",e);msg.innerHTML=`<div class="alert-error">⚠ Error: ${e.message}<br><small>${e.stack||""}</small></div>`;}
+
+          // Render after showing feedback so user sees the result
+          setTimeout(()=>render(),2000);
+
+        }catch(e){
+          console.error("Upload error:",e);
+          msg.innerHTML=`<div class="alert-error">⚠ Upload error: ${e.message}</div>`;
+        }
       };
+
       reader.readAsArrayBuffer(file);
     }
   },0);
