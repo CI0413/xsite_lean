@@ -3447,10 +3447,11 @@ function exportTierLearners(tier, learners){
 
 function exportLearners(learners){
   const d2=data||SAMPLE;
+  const _fd=getFilteredData();
   const rows=learners.map(l=>{
     // Build per-tier status
     const tierStatus=TIERS.map(t=>{
-      const exam=fd?fd.exams.find(x=>x.email===l.email&&x.tier===t):null;
+      const exam=_fd.exams.find(x=>x.email===l.email&&x.tier===t);
       const proj=l.projectsByTier&&l.projectsByTier[t];
       const waived=isProjectWaived(l.email,t);
       const passed=exam&&exam.passed;
