@@ -706,12 +706,14 @@ function getFilteredData(){
   const tierProjEmails=f.tier==="All"?null:new Set(d2.projects.filter(p=>p.tier===f.tier).map(p=>p.email));
 
   const af=d2.attendees.filter(a=>{
-    // Tier filter: include if linked to a workshop of that tier, OR has exam/project for that tier
+    // Tier filter: include if linked to a workshop of that tier,
+    // OR has exam/project for that tier, OR has no workshop at all (site-directed)
     if(f.tier!=="All"){
       const linkedToTierWs=a.workshopId&&wids.has(a.workshopId);
       const hasExamForTier=tierExamEmails&&tierExamEmails.has(a.email);
       const hasProjForTier=tierProjEmails&&tierProjEmails.has(a.email);
-      if(!linkedToTierWs&&!hasExamForTier&&!hasProjForTier)return false;
+      const noWorkshop=!a.workshopId;
+      if(!linkedToTierWs&&!hasExamForTier&&!hasProjForTier&&!noWorkshop)return false;
     } else {
       if(a.workshopId&&!wids.has(a.workshopId))return false;
     }
