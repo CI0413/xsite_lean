@@ -700,10 +700,21 @@ function getFilteredData(){
     (!dateTo||!w.date||w.date<=dateTo)
   );
   const wids=new Set(wf.map(w=>w.id));
+  // When filtering by tier, also include learners who have exam/project for that tier
+  // even if their workshop link is to a different tier
+  const tierExamEmails=f.tier==="All"?null:new Set(d2.exams.filter(x=>x.tier===f.tier).map(x=>x.email));
+  const tierProjEmails=f.tier==="All"?null:new Set(d2.projects.filter(p=>p.tier===f.tier).map(p=>p.email));
+
   const af=d2.attendees.filter(a=>{
-    // Include learners with no workshop (site-based self-directed training)
-    // but still apply other filters
-    if(a.workshopId&&!wids.has(a.workshopId))return false;
+    // Tier filter: include if linked to a workshop of that tier, OR has exam/project for that tier
+    if(f.tier!=="All"){
+      const linkedToTierWs=a.workshopId&&wids.has(a.workshopId);
+      const hasExamForTier=tierExamEmails&&tierExamEmails.has(a.email);
+      const hasProjForTier=tierProjEmails&&tierProjEmails.has(a.email);
+      if(!linkedToTierWs&&!hasExamForTier&&!hasProjForTier)return false;
+    } else {
+      if(a.workshopId&&!wids.has(a.workshopId))return false;
+    }
     if(f.site!=="All"&&a.site!==f.site)return false;
     if(f.country!=="All"&&a.country!==f.country)return false;
     if(f.region!=="All"&&a.region!==f.region)return false;
