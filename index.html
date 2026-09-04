@@ -295,9 +295,14 @@ function trainerStatus(trainer, tier){
 
 function getTrainingDate(email, tier){
   // Returns training date for deadline calc: attendee.trainingDate or workshop date
+  // Only uses trainingDate if the attendee record matches the requested tier (or has no tier set)
   const d2=data||SAMPLE;
   const atts=(d2.attendees||[]).filter(a=>a.email===email);
-  for(const a of atts){if(a.trainingDate)return a.trainingDate;}
+  // First: look for an attendee record with matching tier and a training date
+  for(const a of atts){
+    if(a.trainingDate&&(a.tier===tier||!a.tier))return a.trainingDate;
+  }
+  // Second: look for a workshop of the correct tier
   const tierWsIds=new Set((d2.workshops||[]).filter(w=>w.tier===tier).map(w=>w.id));
   const wsAtt=atts.find(a=>tierWsIds.has(a.workshopId));
   if(wsAtt){const ws=(d2.workshops||[]).find(w=>w.id===wsAtt.workshopId);if(ws?.date)return ws.date;}
@@ -324,6 +329,19 @@ function getAtRiskFlags(email, tier){
   try{
     const d2=data||SAMPLE;
     const today=new Date();
+
+    // Only flag if learner has actually attended training for this tier
+    // (has an attendee record with matching tier, or is linked to a workshop for this tier)
+    const tierWsIds=new Set((d2.workshops||[]).filter(w=>w.tier===tier).map(w=>w.id));
+    const atts=(d2.attendees||[]).filter(a=>a.email===email);
+    const hasAttendedTier=atts.some(a=>
+      (a.tier===tier) || // attendee record has this tier
+      (a.workshopId&&tierWsIds.has(a.workshopId)) // linked to a workshop of this tier
+    );
+    // Also consider them as attending if they have exam rows for this tier
+    const hasExamForTier=(d2.allExamRows||[]).some(r=>r.email===email&&r.tier===tier);
+    if(!hasAttendedTier&&!hasExamForTier)return{exam:null,project:null};
+
     const trainingDate=getTrainingDate(email,tier);
     const trainDt=trainingDate?new Date(trainingDate):null;
     const allRows=(d2.allExamRows||[]).filter(r=>r.email===email&&r.tier===tier);
@@ -1351,7 +1369,14 @@ function viewLearners(){
   const fd=getFilteredData();
   const d2=data||SAMPLE;
   const byEmail={};
-  fd.attendees.forEach(a=>{if(!byEmail[a.email])byEmail[a.email]={...a,wCount:0};byEmail[a.email].wCount++;});
+  fd.attendees.forEach(a=>{
+    if(!byEmail[a.email])byEmail[a.email]={...a,wCount:0,tiers:[]};
+    byEmail[a.email].wCount++;
+    // Collect all tiers from all attendee records for this learner
+    if(a.tier&&!byEmail[a.email].tiers.includes(a.tier))byEmail[a.email].tiers.push(a.tier);
+    // If this attendee record has a training date and the stored one doesn't, use it
+    if(a.trainingDate&&!byEmail[a.email].trainingDate)byEmail[a.email].trainingDate=a.trainingDate;
+  });
 
   const wsMap={};
   (d2.workshops||[]).forEach(w=>{wsMap[w.id]=w;});
